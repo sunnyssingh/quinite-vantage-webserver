@@ -26,6 +26,10 @@ next-env.d.ts
 *.tsbuildinfo
 .env
 .env.local
+.env
+.env.local
+.env.*
+
 
 
 # Production builds

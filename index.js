@@ -1,5 +1,6 @@
-const { WebSocketServer, WebSocket } = require('ws')
+const { WebSocket } = require('ws')
 const { createClient } = require('@supabase/supabase-js')
+const http = require('http')
 require('dotenv').config()
 
 /**
@@ -7,7 +8,7 @@ require('dotenv').config()
  * Deploy this to Render.com or any Node.js hosting service
  */
 
-const PORT = process.env.PORT || 3001
+const PORT = parseInt(process.env.PORT) || 10000
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY
@@ -15,13 +16,26 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY
 // Create Supabase client
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-const wss = new WebSocketServer({
-    port: PORT,
+// Create HTTP server for health checks
+const server = http.createServer((req, res) => {
+    if (req.url === '/health' || req.url === '/') {
+        res.writeHead(200, { 'Content-Type': 'text/plain' })
+        res.end('OK')
+    } else {
+        res.writeHead(404)
+        res.end('Not Found')
+    }
+})
+
+// Create WebSocket server attached to HTTP server
+const wss = new WebSocket.Server({ 
+    server,
     path: '/voice/stream'
 })
 
 console.log(`🎙️  WebSocket server running on port ${PORT}`)
-console.log(`📡 Path: /voice/stream`)
+console.log(`📡 WebSocket path: /voice/stream`)
+console.log(`🏥 Health check: /health`)
 
 wss.on('connection', async (plivoWs, request) => {
     const url = new URL(request.url, `http://${request.headers.host}`)
@@ -118,7 +132,7 @@ Be professional, friendly, and concise. Keep the call under 1 minute.`,
                     // Forward audio to OpenAI
                     const audioAppend = {
                         type: 'input_audio_buffer.append',
-                        audio: data.media.payload // Already base64 μ-law from Plivo
+                        audio: data.media.payload
                     }
                     openaiWs.send(JSON.stringify(audioAppend))
                 } else if (data.event === 'start') {
@@ -138,11 +152,10 @@ Be professional, friendly, and concise. Keep the call under 1 minute.`,
                 const event = JSON.parse(message.toString())
 
                 if (event.type === 'response.audio.delta' && event.delta) {
-                    // Forward audio to Plivo
                     const mediaMessage = {
                         event: 'media',
                         media: {
-                            payload: event.delta // Already base64 μ-law from OpenAI
+                            payload: event.delta
                         }
                     }
                     plivoWs.send(JSON.stringify(mediaMessage))
@@ -202,18 +215,7 @@ wss.on('error', (error) => {
     console.error('WebSocket server error:', error)
 })
 
-// Health check endpoint for Render
-const http = require('http')
-const healthServer = http.createServer((req, res) => {
-    if (req.url === '/health') {
-        res.writeHead(200, { 'Content-Type': 'text/plain' })
-        res.end('OK')
-    } else {
-        res.writeHead(404)
-        res.end('Not Found')
-    }
-})
-
-healthServer.listen(PORT + 1, () => {
-    console.log(`🏥 Health check running on port ${PORT + 1}`)
+// Start server
+server.listen(PORT, () => {
+    console.log(`✅ Server listening on port ${PORT}`)
 })

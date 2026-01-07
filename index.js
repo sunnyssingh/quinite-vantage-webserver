@@ -216,6 +216,6 @@ wss.on('error', (error) => {
 })
 
 // Start server
-server.listen(PORT, () => {
-    console.log(`✅ Server listening on port ${PORT}`)
+server.listen(PORT, "127.0.0.1", () => {
+    console.log(`✅ Server listening on 127.0.0.1:${PORT}`)
 })

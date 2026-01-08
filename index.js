@@ -19,7 +19,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 // Create HTTP server for health checks
 const server = http.createServer((req, res) => {
     if (req.url === '/health' || req.url === '/') {
-        res.writeHead(200, { 'Content-Type': 'text/plain' })
         res.end('OK')
     } else {
         res.writeHead(404)
@@ -28,7 +27,7 @@ const server = http.createServer((req, res) => {
 })
 
 // Create WebSocket server attached to HTTP server
-const wss = new WebSocket.Server({ 
+const wss = new WebSocket.Server({
     server,
     path: '/voice/stream'
 })
@@ -215,7 +214,7 @@ wss.on('error', (error) => {
     console.error('WebSocket server error:', error)
 })
 
-// Start server
 server.listen(PORT, "127.0.0.1", () => {
-    console.log(`✅ Server listening on 127.0.0.1:${PORT}`)
+  console.log(`✅ Server listening on 127.0.0.1:${PORT}`)
 })
+

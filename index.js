@@ -214,7 +214,7 @@ wss.on('error', (error) => {
     console.error('WebSocket server error:', error)
 })
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`✅ Server listening on 127.0.0.1:${PORT}`)
+server.listen(PORT, () => {
+  console.log(`✅ Server listening on ${PORT}`)
 })
 

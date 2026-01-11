@@ -1,0 +1,20 @@
+{
+    "name": "vantage-websocket-server",
+    "version": "1.0.0",
+    "description": "WebSocket server for Plivo + OpenAI Realtime API",
+    "main": "index.js",
+    "type": "module",
+    "scripts": {
+        "start": "node index.js"
+    },
+    "dependencies": {
+        "@supabase/supabase-js": "^2.39.0",
+        "dotenv": "^16.4.5",
+        "express": "^4.21.1",
+        "plivo": "^4.75.4",
+        "ws": "^8.18.0"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
+}

@@ -189,22 +189,11 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                 console.log(`📋 [${callSid}] Instructions: ${sessionUpdate.session.instructions.substring(0, 100)}...`);
                 realtimeWS.send(JSON.stringify(sessionUpdate));
 
-                // Force AI to speak first (initial greeting in Hinglish)
+                // Force AI to speak after a delay (allowing user to say Hello first or waiting for connection)
                 setTimeout(() => {
-                    const initialGreeting = {
-                        type: 'response.create',
-                        response: {
-                            instructions: `Greet the user warmly in a calm, confident male voice (Govind).
-Wait for them to say "Hello" first if possible, otherwise start with:
-
-"Hello! Umm… good day! Am I speaking with ${lead?.name || 'the homeowner'}?"
-
-Strictly wait for the user to respond. Do not rush into the pitch.`
-                        }
-                    };
-                    console.log(`🎤 [${callSid}] Triggering initial Hinglish greeting...`);
-                    realtimeWS.send(JSON.stringify(initialGreeting));
-                }, 500);
+                    console.log(`🎤 [${callSid}] Triggering AI response after delay...`);
+                    realtimeWS.send(JSON.stringify({ type: 'response.create' }));
+                }, 6000);
             }, 250);
         });
 

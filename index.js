@@ -263,6 +263,7 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                     .from('leads')
                                     .update({
                                         call_status: 'transferred',
+                                        status: 'transferred', // Ensure main status updates immediately for UI
                                         transferred_to_human: true
                                     })
                                     .eq('id', leadId)

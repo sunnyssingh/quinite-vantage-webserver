@@ -193,12 +193,12 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                 console.log(`📋 [${callSid}] Instructions: ${sessionUpdate.session.instructions.substring(0, 100)}...`);
                 realtimeWS.send(JSON.stringify(sessionUpdate));
 
-                // Force AI to speak after a short delay (enough for connection, but fast)
+                // Force AI to speak ASAP (500ms to allow config to apply)
                 setTimeout(() => {
                     console.log(`🎤 [${callSid}] Triggering AI response now...`);
                     realtimeWS.send(JSON.stringify({ type: 'response.create' }));
-                }, 2000);
-            }, 250);
+                }, 500);
+            }, 50);
         });
 
         realtimeWS.on('close', () => {

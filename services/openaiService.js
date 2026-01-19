@@ -1,7 +1,8 @@
 import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
-import { WaveFile } from 'wavefile';
+import pkg from 'wavefile';
+const { WaveFile } = pkg;
 import { alawmulaw } from 'alawmulaw';
 
 const openai = new OpenAI({

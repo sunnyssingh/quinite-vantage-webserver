@@ -147,13 +147,18 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
     // Initialize Silero VAD
     let vadSession = null;
     try {
-        const { Silero } = await import('@ricky0123/vad-node');
-        vadSession = new Silero({
-            sampleRate: 8000, // Explicitly tell VAD we might be feeding 8k? No, Silero usually wants 16k.
-            // Let's stick to default and upsample manually or trust it handles it if we pass proper float32.
-            // Documentation says: 8k model available but usually 16k is safer.
-        });
-        console.log(`✅ [${callSid}] Silero VAD Initialized`);
+        // Fix: vad-node exports default as the class or similar. Let's try default import.
+        const vad = await import('@ricky0123/vad-node');
+        const Silero = vad.Silero || vad.default?.Silero; // Safe access attempt
+
+        if (Silero) {
+            vadSession = new Silero({
+                sampleRate: 8000,
+            });
+            console.log(`✅ [${callSid}] Silero VAD Initialized`);
+        } else {
+            console.warn(`⚠️ [${callSid}] Silero class not found in import.`);
+        }
     } catch (e) {
         console.error("VAD Init Error (Fallback energy):", e);
     }
@@ -171,22 +176,46 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
     // --- Helper: Send Audio to Plivo ---
     const sendAudioToPlivo = (pcmBuffer) => {
         try {
-            // OpenAI tts-1 with 'mp3' or 'pcm'. OpenAIService currently returns 'mp3' buffer (from default tools) 
-            // OR if we updated it to return raw buffer.
-            // Let's assume OpenAIService returns decoded PCM or we need to handle it.
-            // WAIT: The valid way with `wavefile` installed is to define OpenAIService to return WAV or decode MP3.
-            // ... For this experiment, let's assume OpenAIService returns MP3 and we fail to play it?
-            // NO, we must transcoding.
-            // Since we can't easily transcode MP3->Mulaw without ffmpeg/lamejs in this env easily...
-            // We rely on the fact that `OpenAIService` (my previous edit) returns `mp3` buffer.
-            // This will NOT work on Plivo directly.
-            // FIX: I will log "Audio Generated" but might not hear it unless I fix the transcoding in `index.js`.
+            // Input: pcmBuffer is 16-bit PCM at 24000Hz (OpenAI TTS-1 default)
+            // Output needed: 8000Hz Mu-Law
 
-            // Hack: Just send it and see if Plivo accepts (it wont). 
-            // Real fix: User Step 2 asked for "Correct Stack", implying we should set it up right.
-            // But without ffmpeg, I am limited.
-            // Let's rely on the text log for verification of the PIPELINE logic first.
-            console.log(`🔊 [${callSid}] (Simulated) Sending ${pcmBuffer.length} bytes to Plivo`);
+            // 1. Downsample 24k -> 8k (Simple decimation: take every 3rd sample)
+            // 24000 / 8000 = 3
+            const inputData = new Int16Array(pcmBuffer.buffer, pcmBuffer.byteOffset, pcmBuffer.length / 2);
+            const downsampledLength = Math.floor(inputData.length / 3);
+            const downsampledData = new Int16Array(downsampledLength);
+
+            for (let i = 0; i < downsampledLength; i++) {
+                downsampledData[i] = inputData[i * 3];
+            }
+
+            // 2. Encode to Mu-Law (Requires 'wavefile' functionality or alawmulaw)
+            // Using alawmulaw: encode(sample) -> uint8
+            // alawmulaw.mulaw.encode takes a single sample or array? 
+            // documentation says: encode(sample)
+            // But we can map it.
+
+            // Optimization: alawmulaw might have a table based encoder for speed or we loop.
+            // Let's loop.
+            const muLawBuffer = new Uint8Array(downsampledLength);
+            for (let i = 0; i < downsampledLength; i++) {
+                muLawBuffer[i] = alawmulaw.mulaw.encode(downsampledData[i]);
+            }
+
+            // 3. Send to Plivo as "media" event (Base64)
+            const payload = Buffer.from(muLawBuffer).toString('base64');
+            const mediaMessage = {
+                event: 'media',
+                media: {
+                    payload: payload,
+                    contentType: "audio/x-mulaw",
+                    sampleRate: "8000"
+                }
+            };
+
+            plivoWS.send(JSON.stringify(mediaMessage));
+            console.log(`🔊 [${callSid}] Sent ${muLawBuffer.length} bytes (mu-law) to Plivo`);
+
         } catch (e) {
             console.error("Audio Send Error:", e);
         }
@@ -194,7 +223,10 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
 
     // --- Helper: Process Turn ---
     const processTurn = async () => {
-        if (audioBuffer.length < 8000) return; // Too short (< 1s of audio)
+        if (audioBuffer.length < 4000) return; // Reduce threshold to 0.5s (8000 samples / 2 bytes? No 8000 bytes = 1s of mu-law? NO. audioBuffer IS PCM-16 8k)
+        // audioBuffer is constructed from generic PCM-16. 8000 samples * 2 bytes = 16000 bytes is 1 second.
+        // So < 8000 bytes is < 0.5s.
+
         if (isProcessing) return;
         isProcessing = true;
 

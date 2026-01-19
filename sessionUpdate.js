@@ -17,12 +17,12 @@ export const createSessionUpdate = (lead, campaign, otherProjects = []) => {
             -------------------------------- */
             turn_detection: {
                 type: "server_vad",
-                // 0.8 is better for TRAFFIC/NOISE. 
-                // It won't trigger on background honks/chatter easily.
-                // It still detects normal speech clearly.
-                threshold: 0.8,
+                // 0.75: Good balance for traffic vs faint speech
+                threshold: 0.75,
                 prefix_padding_ms: 300,
-                silence_duration_ms: 600
+                // 1000ms: More patient. Waits 1s after user stops before replying.
+                // Prevents cutting off user during thinking pauses.
+                silence_duration_ms: 1000
             },
 
             input_audio_format: "g711_ulaw",
@@ -133,7 +133,7 @@ You MUST disconnect the call immediately if:
 1. **ABUSIVE LANGUAGE (ZERO TOLERANCE)**:
    - If user swears, insults, or shouts:
    - **Say ONLY**: "Sir/Ma'am, please mind your language. I am disconnecting."
-   - **THEN IMMEDIATELY CALL `disconnect_call`**.
+   - **THEN IMMEDIATELY CALL disconnect_call**.
    - DO NOT ARGUE. DO NOT CONTINUE.
 
 2. **Customer is CLEARLY NOT INTERESTED** (after 2-3 attempts):
@@ -154,57 +154,57 @@ You MUST disconnect the call immediately if:
 - **BE TO THE POINT**.
 `,
 
-        voice: "coral",
+            voice: "coral",
 
-        /* -------------------------------
-           TOOLS
-        -------------------------------- */
-        tools: [
-            {
-                type: "function",
-                name: "transfer_call",
-                description:
-                    "Transfer the call to a human Sales Manager ONLY when the customer shows clear buying intent or explicitly asks.",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        department: {
-                            type: "string",
-                            enum: ["sales", "support"],
-                            description:
-                                "Use 'sales' for interested customers, 'support' for complaints."
+            /* -------------------------------
+               TOOLS
+            -------------------------------- */
+            tools: [
+                {
+                    type: "function",
+                    name: "transfer_call",
+                    description:
+                        "Transfer the call to a human Sales Manager ONLY when the customer shows clear buying intent or explicitly asks.",
+                    parameters: {
+                        type: "object",
+                        properties: {
+                            department: {
+                                type: "string",
+                                enum: ["sales", "support"],
+                                description:
+                                    "Use 'sales' for interested customers, 'support' for complaints."
+                            },
+                            reason: {
+                                type: "string",
+                                description:
+                                    "Short reason like: 'Customer asking pricing', 'Ready for site visit'"
+                            }
                         },
-                        reason: {
-                            type: "string",
-                            description:
-                                "Short reason like: 'Customer asking pricing', 'Ready for site visit'"
-                        }
-                    },
-                    required: ["reason"]
-                }
-            },
-            {
-                type: "function",
-                name: "disconnect_call",
-                description:
-                    "IMMEDIATELY Disconnect call if: 1) User uses ABUSIVE language/Swears (Zero Tolerance), 2) User is NOT INTERESTED, 3) Wrong Number.",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        reason: {
-                            type: "string",
-                            enum: ["not_interested", "abusive_language", "wrong_number", "other"],
-                            description: "Reason for disconnecting the call"
+                        required: ["reason"]
+                    }
+                },
+                {
+                    type: "function",
+                    name: "disconnect_call",
+                    description:
+                        "IMMEDIATELY Disconnect call if: 1) User uses ABUSIVE language/Swears (Zero Tolerance), 2) User is NOT INTERESTED, 3) Wrong Number.",
+                    parameters: {
+                        type: "object",
+                        properties: {
+                            reason: {
+                                type: "string",
+                                enum: ["not_interested", "abusive_language", "wrong_number", "other"],
+                                description: "Reason for disconnecting the call"
+                            },
+                            notes: {
+                                type: "string",
+                                description: "Brief note about why the call is being disconnected"
+                            }
                         },
-                        notes: {
-                            type: "string",
-                            description: "Brief note about why the call is being disconnected"
-                        }
-                    },
-                    required: ["reason"]
+                        required: ["reason"]
+                    }
                 }
-            }
-        ]
-    }
-};
+            ]
+        }
+    };
 };

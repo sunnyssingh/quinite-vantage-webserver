@@ -148,6 +148,7 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
 
     // Initialize Silero VAD
     // Initialize Silero VAD
+    // Initialize Silero VAD
     let vadSession = null;
     try {
         const vad = await import('@ricky0123/vad-node');
@@ -160,6 +161,10 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
 
         if (Silero) {
             console.log(`DEBUG SILERO TYPE: ${typeof Silero}`);
+            if (typeof Silero === 'object') {
+                console.log("DEBUG SILERO PROPS:", Object.keys(Silero));
+            }
+
             try {
                 // Check if it's a constructor or just an object
                 vadSession = new Silero({
@@ -191,23 +196,27 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
         try {
             console.log(`🔊 [${callSid}] Transcoding: Input PCM Size=${pcmBuffer.length} bytes`);
 
-            // 1. Resample: 24kHz (PCM16) -> 8kHz (PCM16) using WaveFile
-            const wav = new WaveFile();
-            wav.fromScratch(1, 24000, '16', pcmBuffer);
-            wav.toSampleRate(8000);
+            // MANUAL TRANSCODING (24kHz -> 8kHz)
+            // OpenAI PCM is 16-bit Little Endian, 24000Hz.
+            // Plivo needs 8000Hz u-law.
 
-            // 2. Get Samples: Int16Array (16-bit signed)
-            // getSamples(interleaved=false) returns array of per-channel arrays
-            // We have 1 channel, so get samples[0]
-            const samples = wav.getSamples(false, Int16Array)[0];
+            // 1. Create DataView for robust Int16 reading
+            const inputData = new Int16Array(pcmBuffer.buffer, pcmBuffer.byteOffset, pcmBuffer.length / 2);
+
+            // 2. Downsample (Take every 3rd sample)
+            // 24000 / 3 = 8000
+            const targetLength = Math.floor(inputData.length / 3);
+            const resampledData = new Int16Array(targetLength);
+
+            for (let i = 0, j = 0; i < inputData.length && j < targetLength; i += 3, j++) {
+                resampledData[j] = inputData[i];
+            }
 
             // 3. Encode to Mu-Law (8-bit) using alawmulaw
-            // Input: Int16Array, Output: Uint8Array (or array of bytes)
-            const muLawSamples = alawmulaw.mulaw.encode(samples);
+            const muLawSamples = alawmulaw.mulaw.encode(resampledData);
             const muLawBuffer = Buffer.from(muLawSamples);
 
-            console.log(`   -> Resampled & Encoded: ${muLawBuffer.length} bytes (Expected ~${pcmBuffer.length / 6})`);
-            // 24k -> 8k is /3. 16bit -> 8bit is /2. Total /6.
+            console.log(`   -> Resampled & Encoded via Manual Decimation: ${muLawBuffer.length} bytes`);
 
             // 5. Send to Plivo
             const payload = muLawBuffer.toString('base64');

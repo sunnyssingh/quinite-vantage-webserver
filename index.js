@@ -147,9 +147,9 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
     // Initialize Silero VAD
     let vadSession = null;
     try {
-        // Fix: vad-node exports default as the class or similar. Let's try default import.
         const vad = await import('@ricky0123/vad-node');
-        const Silero = vad.Silero || vad.default?.Silero; // Safe access attempt
+        // Correct way to import based on recent ESM/CJS interop issues with this package
+        const Silero = vad.Silero || vad.default?.Silero || vad.default;
 
         if (Silero) {
             vadSession = new Silero({
@@ -157,7 +157,7 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
             });
             console.log(`✅ [${callSid}] Silero VAD Initialized`);
         } else {
-            console.warn(`⚠️ [${callSid}] Silero class not found in import.`);
+            console.warn(`⚠️ [${callSid}] Silero class not found despite import success.`);
         }
     } catch (e) {
         console.error("VAD Init Error (Fallback energy):", e);
@@ -179,31 +179,24 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
             // Input: pcmBuffer is 16-bit PCM at 24000Hz (OpenAI TTS-1 default)
             // Output needed: 8000Hz Mu-Law
 
-            // 1. Downsample 24k -> 8k (Simple decimation: take every 3rd sample)
-            // 24000 / 8000 = 3
-            const inputData = new Int16Array(pcmBuffer.buffer, pcmBuffer.byteOffset, pcmBuffer.length / 2);
-            const downsampledLength = Math.floor(inputData.length / 3);
-            const downsampledData = new Int16Array(downsampledLength);
+            // Use WaveFile for robust processing
+            const wav = new WaveFile();
 
-            for (let i = 0; i < downsampledLength; i++) {
-                downsampledData[i] = inputData[i * 3];
-            }
+            // 1. Load: 1 Channel, 24000Hz, '16-bit'
+            wav.fromScratch(1, 24000, '16', pcmBuffer);
 
-            // 2. Encode to Mu-Law (Requires 'wavefile' functionality or alawmulaw)
-            // Using alawmulaw: encode(sample) -> uint8
-            // alawmulaw.mulaw.encode takes a single sample or array? 
-            // documentation says: encode(sample)
-            // But we can map it.
+            // 2. Resample to 8000Hz
+            wav.toSampleRate(8000);
 
-            // Optimization: alawmulaw might have a table based encoder for speed or we loop.
-            // Let's loop.
-            const muLawBuffer = new Uint8Array(downsampledLength);
-            for (let i = 0; i < downsampledLength; i++) {
-                muLawBuffer[i] = alawmulaw.mulaw.encode(downsampledData[i]);
-            }
+            // 3. Encode to Mu-Law
+            wav.toMuLaw();
 
-            // 3. Send to Plivo as "media" event (Base64)
-            const payload = Buffer.from(muLawBuffer).toString('base64');
+            // 4. Extract samples (Mu-Law chars)
+            // wav.data.samples is the Uint8Array of mu-law bytes
+            const muLawBuffer = Buffer.from(wav.data.samples);
+
+            // 5. Send to Plivo
+            const payload = muLawBuffer.toString('base64');
             const mediaMessage = {
                 event: 'media',
                 media: {

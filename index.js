@@ -102,51 +102,35 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
     console.log(`📊 [${callSid}] Campaign ID: ${campaignId}`);
 
     try {
-        // Fetch lead and campaign data
-        console.log(`🔍 [${callSid}] Fetching lead data...`);
-        const { data: lead, error: leadError } = await supabase
-            .from('leads')
-            .select('*, project:projects(*)')
-            .eq('id', leadId)
-            .single();
 
-        if (leadError) {
-            console.error(`❌ [${callSid}] Lead fetch error:`, leadError);
-            throw new Error(`Lead not found: ${leadError.message}`);
-        }
-        console.log(`✅ [${callSid}] Lead found: ${lead.name} (${lead.phone})`);
-        console.log(`✅ [${callSid}] Project Context: ${lead.project?.name || 'None'}`);
+        // 1. Parallelize initial data fetching (Lead & Campaign)
+        const [leadResult, campaignResult] = await Promise.all([
+            supabase.from('leads').select('*, project:projects(*)').eq('id', leadId).single(),
+            supabase.from('campaigns').select('*, organization:organizations(*)').eq('id', campaignId).single()
+        ]);
 
-        console.log(`🔍 [${callSid}] Fetching campaign data...`);
-        const { data: campaign, error: campaignError } = await supabase
-            .from('campaigns')
-            .select('*, organization:organizations(*)')
-            .eq('id', campaignId)
-            .single();
+        if (leadResult.error) throw new Error(`Lead error: ${leadResult.error.message}`);
+        if (campaignResult.error) throw new Error(`Campaign error: ${campaignResult.error.message}`);
 
-        if (campaignError) {
-            console.error(`❌ [${callSid}] Campaign fetch error:`, campaignError);
-            throw new Error(`Campaign not found: ${campaignError.message}`);
-        }
-        console.log(`✅ [${callSid}] Campaign found: ${campaign.name}`);
-        console.log(`📝 [${callSid}] AI Script: ${campaign.ai_script?.substring(0, 50)}...`);
-        console.log(`🎤 [${callSid}] AI Voice: ${campaign.ai_voice || 'alloy'}`);
+        const lead = leadResult.data;
+        const campaign = campaignResult.data;
 
-        // Fetch other projects for this organization (for Cross-Selling context)
-        console.log(`🔍 [${callSid}] Fetching other projects for Organization: ${campaign.organization_id}...`);
-        const { data: allProjects, error: projectsError } = await supabase
+        console.log(`✅ [${callSid}] Data fetched: ${lead.name}, Campaign: ${campaign.name}`);
+        console.log(`🎤 [${callSid}] AI Voice: ${campaign.ai_voice || 'shimmer'}`);
+
+        // 2. Fetch Context & Create Log in Parallel with OpenAI Connection Setup
+        // We start fetching 'otherProjects' but don't await immediately if possible.
+        // Actually, 'createSessionUpdate' needs 'otherProjects'. So we must await it.
+
+        // Actually, 'createSessionUpdate' needs 'otherProjects'. So we must await it.
+        const projectsPromise = supabase
             .from('projects')
             .select('name, description, status, location')
             .eq('organization_id', campaign.organization_id)
             .eq('status', 'active');
 
-        if (projectsError) console.error(`⚠️ [${callSid}] Failed to fetch projects:`, projectsError.message);
-        const otherProjects = allProjects || [];
-        console.log(`✅ [${callSid}] Found ${otherProjects.length} active projects for context.`);
-
-        // Create call log
-        console.log(`📝 [${callSid}] Creating call log...`);
-        const { data: callLog, error: callLogError } = await supabase
+        // Fire-and-forget Call Log creation (Critical speed optimization)
+        const logPromise = supabase
             .from('call_logs')
             .insert({
                 organization_id: campaign.organization_id,
@@ -160,18 +144,24 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                 callee_number: lead.phone
             })
             .select()
-            .single();
+            .single()
+            .then(({ data, error }) => {
+                if (error) console.error(`❌ [${callSid}] Log Error:`, error.message);
+                else console.log(`✅ [${callSid}] Log Created: ${data.id}`);
+                return data;
+            });
 
-        if (callLogError) {
-            console.error(`❌ [${callSid}] Call log creation error:`, callLogError);
-            console.error(`❌ [${callSid}] Error details:`, JSON.stringify(callLogError, null, 2));
-        } else {
-            console.log(`✅ [${callSid}] Call log created: ${callLog.id}`);
-        }
+        // Wait for Projects (needed for prompt)
+        const { data: allProjects } = await projectsPromise;
+        const otherProjects = allProjects || [];
+
+        // Await Call Log only for the ID variable if needed later (we can use a variable that resolves later)
+        // But for 'index.js', we use 'callLog' in close handlers. 
+        // We'll await it now to be safe, but it ran in parallel with Projects fetch.
+        const callLog = await logPromise;
 
         // Connect to OpenAI Realtime API
         console.log(`🔌 [${callSid}] Connecting to OpenAI Realtime API...`);
-        console.log(`🔌 [${callSid}] Connecting to OpenAI Realtime API (Mini Model)...`);
         const realtimeWS = new WebSocket(
             'wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview',
             {
@@ -189,13 +179,10 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
 
             setTimeout(() => {
                 const sessionUpdate = createSessionUpdate(lead, campaign, otherProjects);
-                console.log(`📤 [${callSid}] Sending session configuration...`);
-                console.log(`📋 [${callSid}] Instructions: ${sessionUpdate.session.instructions.substring(0, 100)}...`);
                 realtimeWS.send(JSON.stringify(sessionUpdate));
 
                 // Force AI to speak ASAP (500ms to allow config to apply)
                 setTimeout(() => {
-                    console.log(`🎤 [${callSid}] Triggering AI response now...`);
                     realtimeWS.send(JSON.stringify({ type: 'response.create' }));
                 }, 500);
             }, 50);

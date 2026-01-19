@@ -176,6 +176,8 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
     // --- Helper: Send Audio to Plivo ---
     const sendAudioToPlivo = (pcmBuffer) => {
         try {
+            console.log(`🔊 [${callSid}] Transcoding: Input PCM Size=${pcmBuffer.length} bytes`);
+
             // Input: pcmBuffer is 16-bit PCM at 24000Hz (OpenAI TTS-1 default)
             // Output needed: 8000Hz Mu-Law
 
@@ -194,6 +196,7 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
             // 4. Extract samples (Mu-Law chars)
             // wav.data.samples is the Uint8Array of mu-law bytes
             const muLawBuffer = Buffer.from(wav.data.samples);
+            console.log(`   -> Encoded MuLaw Size=${muLawBuffer.length} bytes`);
 
             // 5. Send to Plivo
             const payload = muLawBuffer.toString('base64');
@@ -207,7 +210,7 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
             };
 
             plivoWS.send(JSON.stringify(mediaMessage));
-            console.log(`🔊 [${callSid}] Sent ${muLawBuffer.length} bytes (mu-law) to Plivo`);
+            console.log(`🚀 [${callSid}] Sent Media Message to Plivo`);
 
         } catch (e) {
             console.error("Audio Send Error:", e);

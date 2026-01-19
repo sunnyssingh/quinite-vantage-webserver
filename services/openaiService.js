@@ -23,6 +23,7 @@ export const OpenAIService = {
      * @param {Buffer} audioBuffer - Raw audio buffer (8000Hz, mulaw)
      */
     async transcribeAudio(audioBuffer) {
+        console.log(`🎙️ [OpenAIService] Transcribing ${audioBuffer.length} bytes...`);
         let tempPath = null;
         try {
             // 1. Convert Mulaw (8000Hz_ -> PCM (16-bit, 8000Hz)
@@ -52,6 +53,7 @@ export const OpenAIService = {
                 language: "en", // Optimize for Hinglish if possible, or auto
             });
 
+            console.log(`   -> STT Result: "${transcription.text}"`);
             return transcription.text;
         } catch (error) {
             console.error("STT Error:", error);
@@ -67,6 +69,7 @@ export const OpenAIService = {
      * 2. LLM: Generate Response using GPT-4o-mini
      */
     async generateResponse(systemPrompt, history, userText) {
+        console.log(`🧠 [OpenAIService] Generating Response for: "${userText}"`);
         try {
             const messages = [
                 { role: "system", content: systemPrompt },
@@ -80,7 +83,9 @@ export const OpenAIService = {
                 max_tokens: 150,
             });
 
-            return completion.choices[0].message.content;
+            const result = completion.choices[0].message.content;
+            console.log(`   -> LLM Output: "${result}"`);
+            return result;
         } catch (error) {
             console.error("LLM Error:", error);
             // Fallback response
@@ -94,18 +99,18 @@ export const OpenAIService = {
      * OR we convert here.
      */
     async generateAudio(text) {
+        console.log(`🎼 [OpenAIService] Generating TTS for: "${text.substring(0, 30)}..."`);
         try {
             const mp3 = await openai.audio.speech.create({
                 model: "tts-1",
                 voice: "shimmer",
                 input: text,
-                response_format: "mp3" // Use MP3 for stability, then decode -> resample -> encode
+                response_format: "pcm" // Request raw PCM (24kHz by default for tts-1)
             });
 
             const buffer = Buffer.from(await mp3.arrayBuffer());
+            console.log(`   -> TTS Generated: ${buffer.length} bytes (PCM 24kHz)`);
             return buffer;
-            // Note: This buffer is likely 24kHz/16bit PCM. 
-            // Plivo needs 8kHz Mulaw. We will handle conversion in index.js or here.
         } catch (error) {
             console.error("TTS Error:", error);
             return null;

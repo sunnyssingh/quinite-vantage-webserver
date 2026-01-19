@@ -17,7 +17,7 @@ export const createSessionUpdate = (lead, campaign, otherProjects = []) => {
             -------------------------------- */
             turn_detection: {
                 type: "server_vad",
-                threshold: 0.6,
+                threshold: 0.8,
                 prefix_padding_ms: 300,
                 silence_duration_ms: 600
             },
@@ -25,7 +25,7 @@ export const createSessionUpdate = (lead, campaign, otherProjects = []) => {
             input_audio_format: "g711_ulaw",
             output_audio_format: "g711_ulaw",
             modalities: ["text", "audio"],
-            temperature: 0.85,
+            temperature: 0.6,
 
             /* -------------------------------
                CORE BRAIN / SYSTEM PROMPT
@@ -141,7 +141,7 @@ You MUST disconnect the call immediately if:
 - **BE TO THE POINT**.
 b`,
 
-            voice: campaign?.ai_voice || "shimmer",
+            voice: campaign?.ai_voice || "coral",
 
             /* -------------------------------
                TOOLS

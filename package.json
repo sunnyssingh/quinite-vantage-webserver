@@ -8,10 +8,14 @@
         "start": "node index.js"
     },
     "dependencies": {
+        "@ricky0123/vad-node": "^0.0.3",
         "@supabase/supabase-js": "^2.39.0",
+        "alawmulaw": "^6.0.0",
         "dotenv": "^16.4.5",
         "express": "^4.21.1",
+        "openai": "^6.16.0",
         "plivo": "^4.75.4",
+        "wavefile": "^11.0.0",
         "ws": "^8.18.0"
     },
     "engines": {

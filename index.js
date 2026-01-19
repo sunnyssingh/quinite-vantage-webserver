@@ -218,14 +218,14 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
 
             console.log(`   -> Resampled & Encoded via Manual Decimation: ${muLawBuffer.length} bytes`);
 
-            // 5. Send to Plivo
+            // 5. Send to Plivo (Bidirectional Stream Format)
             const payload = muLawBuffer.toString('base64');
             const mediaMessage = {
-                event: 'media',
+                event: 'playAudio',  // For bidirectional streams, use 'playAudio' not 'media'
                 media: {
                     payload: payload,
                     contentType: "audio/x-mulaw",
-                    sampleRate: "8000"
+                    sampleRate: 8000  // Must be number, not string
                 }
             };
 

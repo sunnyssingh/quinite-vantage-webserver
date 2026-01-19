@@ -4,6 +4,11 @@ import path from 'path';
 import pkg from 'wavefile';
 const { WaveFile } = pkg;
 import alawmulaw from 'alawmulaw';
+import { File } from 'node:buffer';
+
+if (!globalThis.File) {
+    globalThis.File = File;
+}
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,

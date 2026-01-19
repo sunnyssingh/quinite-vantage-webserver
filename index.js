@@ -137,6 +137,7 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
     let silenceStart = null;
     let history = []; // Chat history for LLM
     let isProcessing = false;
+    let isSpeaking = false;
 
     // VAD State (Silero)
     // Mulaw max amplitude is 8-bit, but expanded to 14-bit linear.

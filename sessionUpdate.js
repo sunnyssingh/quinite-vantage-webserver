@@ -130,12 +130,14 @@ English:
 ━━━━━━━━━━━━━━━━━━━━━━
 You MUST disconnect the call immediately if:
 
-1. **Customer is CLEARLY NOT INTERESTED** (after 2-3 attempts):
-   - Response: "Okay sir, koi baat nahi. Bye!"
-   - Then use disconnect_call tool.
+1. **ABUSIVE LANGUAGE (ZERO TOLERANCE)**:
+   - If user swears, insults, or shouts:
+   - **Say ONLY**: "Sir/Ma'am, please mind your language. I am disconnecting."
+   - **THEN IMMEDIATELY CALL `disconnect_call`**.
+   - DO NOT ARGUE. DO NOT CONTINUE.
 
-2. **ABUSIVE LANGUAGE**:
-   - Response: "Sir please mind your language. I am disconnecting."
+2. **Customer is CLEARLY NOT INTERESTED** (after 2-3 attempts):
+   - Response: "Okay sir, koi baat nahi. Bye!"
    - Then use disconnect_call tool.
 
 3. **WRONG NUMBER**:
@@ -152,57 +154,57 @@ You MUST disconnect the call immediately if:
 - **BE TO THE POINT**.
 b`,
 
-            voice: "coral",
+        voice: "coral",
 
-            /* -------------------------------
-               TOOLS
-            -------------------------------- */
-            tools: [
-                {
-                    type: "function",
-                    name: "transfer_call",
-                    description:
-                        "Transfer the call to a human Sales Manager ONLY when the customer shows clear buying intent or explicitly asks.",
-                    parameters: {
-                        type: "object",
-                        properties: {
-                            department: {
-                                type: "string",
-                                enum: ["sales", "support"],
-                                description:
-                                    "Use 'sales' for interested customers, 'support' for complaints."
-                            },
-                            reason: {
-                                type: "string",
-                                description:
-                                    "Short reason like: 'Customer asking pricing', 'Ready for site visit'"
-                            }
+        /* -------------------------------
+           TOOLS
+        -------------------------------- */
+        tools: [
+            {
+                type: "function",
+                name: "transfer_call",
+                description:
+                    "Transfer the call to a human Sales Manager ONLY when the customer shows clear buying intent or explicitly asks.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        department: {
+                            type: "string",
+                            enum: ["sales", "support"],
+                            description:
+                                "Use 'sales' for interested customers, 'support' for complaints."
                         },
-                        required: ["reason"]
-                    }
-                },
-                {
-                    type: "function",
-                    name: "disconnect_call",
-                    description:
-                        "Disconnect the call professionally when: 1) Customer is clearly not interested after 2-3 attempts, 2) Customer uses abusive language or is disrespectful, 3) Wrong number. ALWAYS say goodbye before disconnecting.",
-                    parameters: {
-                        type: "object",
-                        properties: {
-                            reason: {
-                                type: "string",
-                                enum: ["not_interested", "abusive_language", "wrong_number", "other"],
-                                description: "Reason for disconnecting the call"
-                            },
-                            notes: {
-                                type: "string",
-                                description: "Brief note about why the call is being disconnected"
-                            }
-                        },
-                        required: ["reason"]
-                    }
+                        reason: {
+                            type: "string",
+                            description:
+                                "Short reason like: 'Customer asking pricing', 'Ready for site visit'"
+                        }
+                    },
+                    required: ["reason"]
                 }
-            ]
-        }
-    };
+            },
+            {
+                type: "function",
+                name: "disconnect_call",
+                description:
+                    "IMMEDIATELY Disconnect call if: 1) User uses ABUSIVE language/Swears (Zero Tolerance), 2) User is NOT INTERESTED, 3) Wrong Number.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        reason: {
+                            type: "string",
+                            enum: ["not_interested", "abusive_language", "wrong_number", "other"],
+                            description: "Reason for disconnecting the call"
+                        },
+                        notes: {
+                            type: "string",
+                            description: "Brief note about why the call is being disconnected"
+                        }
+                    },
+                    required: ["reason"]
+                }
+            }
+        ]
+    }
+};
 };

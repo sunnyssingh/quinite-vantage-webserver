@@ -138,10 +138,24 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
     let history = []; // Chat history for LLM
     let isProcessing = false;
 
-    // VAD Constants (Simple Energy Based for Experiment)
+    // VAD State (Silero)
     // Mulaw max amplitude is 8-bit, but expanded to 14-bit linear.
-    const SILENCE_THRESHOLD = 0.05; // 5% Amplitude threshold (0-1 range)
-    const SILENCE_DURATION_MS = 1200; // 1.2s silence to trigger turn
+    const SILENCE_THRESHOLD = 0.05; // 5% Amplitude threshold (Fallback)
+    const SILENCE_DURATION_MS = 1000;
+
+    // Initialize Silero VAD
+    let vadSession = null;
+    try {
+        const { Silero } = await import('@ricky0123/vad-node');
+        vadSession = new Silero({
+            sampleRate: 8000, // Explicitly tell VAD we might be feeding 8k? No, Silero usually wants 16k.
+            // Let's stick to default and upsample manually or trust it handles it if we pass proper float32.
+            // Documentation says: 8k model available but usually 16k is safer.
+        });
+        console.log(`✅ [${callSid}] Silero VAD Initialized`);
+    } catch (e) {
+        console.error("VAD Init Error (Fallback energy):", e);
+    }
 
     // Greeting
     console.log(`🗣️ [${callSid}] Generating Greeting...`);
@@ -217,28 +231,65 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
         const data = JSON.parse(msg);
         if (data.event === 'media') {
             const chunk = Buffer.from(data.media.payload, 'base64');
-            audioBuffer = Buffer.concat([audioBuffer, chunk]);
 
-            // Simple VAD Logic
-            // 1. Decode chunk to check volume
-            const samples = alawmulaw.mulaw.decode(chunk);
-            let maxVal = 0;
-            for (let i = 0; i < samples.length; i++) {
-                const val = Math.abs(samples[i]) / 32768; // Normalize 16bit
-                if (val > maxVal) maxVal = val;
+            // 1. Decode Mu-Law to PCM-16 (8kHz)
+            const pcmSamples = alawmulaw.mulaw.decode(chunk);
+            const pcmBuffer = Buffer.from(pcmSamples.buffer);
+            audioBuffer = Buffer.concat([audioBuffer, pcmBuffer]);
+
+            // VAD Processing
+            let isSpeechDetected = false;
+
+            if (vadSession) {
+                // Silero VAD (Experimental)
+                // Convert Int16 -> Float32
+                const float32Samples = new Float32Array(pcmSamples.length);
+                for (let i = 0; i < pcmSamples.length; i++) {
+                    float32Samples[i] = pcmSamples[i] / 32768.0;
+                }
+
+                try {
+                    const vadResult = await vadSession.process(float32Samples);
+                    // Support both API styles just in case
+                    if (vadResult && (vadResult.isSpeech || vadResult === true)) {
+                        isSpeechDetected = true;
+                    }
+                } catch (e) {
+                    // console.error("VAD Process Error", e);
+                }
             }
 
-            if (maxVal > SILENCE_THRESHOLD) {
-                // Speech Detected
-                silenceStart = null;
-                // If we were processing, maybe queue an interruption?
+            // Fallback: Energy
+            if (!isSpeechDetected) {
+                let maxVal = 0;
+                for (let i = 0; i < pcmSamples.length; i++) {
+                    const val = Math.abs(pcmSamples[i]) / 32768;
+                    if (val > maxVal) maxVal = val;
+                }
+                if (maxVal > SILENCE_THRESHOLD) isSpeechDetected = true;
+            }
+
+            // Pipeline Logic
+            if (isSpeechDetected) {
+                // SPEECH DETECTED
+                if (isSpeaking) {
+                    console.log(`⚡ [${callSid}] Interruption Detected! Stopping AI.`);
+                    isSpeaking = false;
+                    plivoWS.send(JSON.stringify({ event: 'clearAudio' }));
+                }
+
+                if (silenceStart) {
+                    silenceStart = null;
+                }
             } else {
-                // Silence
+                // SILENCE
                 if (!silenceStart) silenceStart = Date.now();
                 else if (Date.now() - silenceStart > SILENCE_DURATION_MS) {
                     // Trigger Turn
-                    processTurn();
-                    silenceStart = null; // Reset to avoid double trigger
+                    if (audioBuffer.length > 4000) { // Min 0.5s audio
+                        processTurn();
+                        silenceStart = null;
+                    }
                 }
             }
         }
@@ -247,6 +298,7 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
             console.log(`[${callSid}] Call Stream Stopped.`);
         }
     });
+
 
     plivoWS.on('close', () => console.log(`[${callSid}] Plivo Disconnected`));
     plivoWS.on('error', (e) => console.error(`[${callSid}] Plivo Error`, e));

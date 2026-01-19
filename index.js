@@ -6,6 +6,8 @@ import dotenv from 'dotenv';
 import plivo from 'plivo';
 import { OpenAIService } from './services/openaiService.js';
 import alawmulaw from 'alawmulaw';
+import pkg from 'wavefile';
+const { WaveFile } = pkg;
 
 dotenv.config();
 
@@ -148,14 +150,23 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
     let vadSession = null;
     try {
         const vad = await import('@ricky0123/vad-node');
-        // Correct way to import based on recent ESM/CJS interop issues with this package
-        const Silero = vad.Silero || vad.default?.Silero || vad.default;
+        // Inspection log to debug this once and for all if it fails again
+        if (!vad.Silero && !vad.default) {
+            console.log("DEBUG VAD IMPORT:", Object.keys(vad));
+        }
+
+        const Silero = vad.Silero || (vad.default && vad.default.Silero) || vad.default;
 
         if (Silero) {
-            vadSession = new Silero({
-                sampleRate: 8000,
-            });
-            console.log(`✅ [${callSid}] Silero VAD Initialized`);
+            try {
+                // Check if it's a constructor or just an object
+                vadSession = new Silero({
+                    sampleRate: 8000,
+                });
+                console.log(`✅ [${callSid}] Silero VAD Initialized`);
+            } catch (err) {
+                console.error(`❌ [${callSid}] Silero found but constructor failed:`, err);
+            }
         } else {
             console.warn(`⚠️ [${callSid}] Silero class not found despite import success.`);
         }

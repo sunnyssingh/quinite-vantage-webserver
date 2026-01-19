@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import pkg from 'wavefile';
 const { WaveFile } = pkg;
-import { alawmulaw } from 'alawmulaw';
+import alawmulaw from 'alawmulaw';
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,

@@ -5,7 +5,7 @@ import http from 'http';
 import dotenv from 'dotenv';
 import plivo from 'plivo';
 import { OpenAIService } from './services/openaiService.js';
-import { alawmulaw } from 'alawmulaw';
+import alawmulaw from 'alawmulaw';
 
 dotenv.config();
 

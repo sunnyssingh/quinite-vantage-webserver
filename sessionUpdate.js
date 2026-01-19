@@ -152,7 +152,7 @@ You MUST disconnect the call immediately if:
 - **NO ROBOTIC VOICE**: Sound like a busy human girl calling from office.
 - **NO LONG SPEECHES**: 1-2 sentences max.
 - **BE TO THE POINT**.
-b`,
+`,
 
         voice: "coral",
 

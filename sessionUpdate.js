@@ -17,9 +17,9 @@ export const createSessionUpdate = (lead, campaign, otherProjects = []) => {
             -------------------------------- */
             turn_detection: {
                 type: "server_vad",
-                threshold: 1.0,
-                prefix_padding_ms: 100,
-                silence_duration_ms: 400
+                threshold: 0.6,
+                prefix_padding_ms: 300,
+                silence_duration_ms: 600
             },
 
             input_audio_format: "g711_ulaw",
@@ -43,9 +43,12 @@ You are **Riya**, a friendly and casual ${campaign?.organization?.name || 'real 
 5. **BE CONCISE**: Answer in 1 short sentence only. Don't over-explain.
 
 ━━━━━━━━━━━━━━━━━━━━━━
-🗣 LANGUAGE & FLOW
+🗣 LANGUAGE & FLOW (FEMALE GRAMMAR)
 ━━━━━━━━━━━━━━━━━━━━━━
 - **DEFAULT**: Hinglish (Hindi + English mix).
+- **GENDER RULE**: ALWAYS use FEMALE verb forms.
+  - ✅ Correct: "Main check kar *rahi* thi", "Maine *dekha*", "Main *aayi* hoon".
+  - ❌ Wrong: "Main karta hoon", "Main aaya".
 - **ADAPT**: If they speak English/Gujarati/Marathi/South Indian, switch immediately.
 
 ━━━━━━━━━━━━━━━━━━━━━━

@@ -102,12 +102,52 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
     console.log(`📊 [${callSid}] Campaign ID: ${campaignId}`);
 
     try {
+        // 1. Start OpenAI Connection IMMEDIATELY (Parallel to DB) 🚀
+        console.log(`🔌 [${callSid}] Connecting to OpenAI Realtime API...`);
+        const realtimeWS = new WebSocket(
+            'wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview',
+            {
+                headers: {
+                    'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                    'OpenAI-Beta': 'realtime=v1'
+                }
+            }
+        );
 
-        // 1. Parallelize initial data fetching (Lead & Campaign)
-        const [leadResult, campaignResult] = await Promise.all([
+        const wsOpenPromise = new Promise((resolve, reject) => {
+            realtimeWS.on('open', () => resolve());
+            realtimeWS.on('error', (err) => reject(err));
+        });
+
+        // 2. Parallelize Data Fetching (Lead & Campaign)
+        const dbFetchPromise = Promise.all([
             supabase.from('leads').select('*, project:projects(*)').eq('id', leadId).single(),
             supabase.from('campaigns').select('*, organization:organizations(*)').eq('id', campaignId).single()
         ]);
+
+        // 3. Fire-and-forget Call Log (Don't await here!)
+        // We store the promise to await it ONLY when needed (close/transfer)
+        const logPromise = supabase
+            .from('call_logs')
+            .insert({
+                organization_id: null, // Will be filled contextually if possible, or updated later
+                campaign_id: campaignId,
+                lead_id: leadId,
+                call_sid: callSid,
+                call_status: 'in_progress',
+                direction: 'outbound',
+                caller_number: process.env.PLIVO_PHONE_NUMBER,
+                callee_number: 'PENDING' // Update later
+            })
+            .select() // We need to re-fetch/select correctly after campaign load to get org_id if strict
+        // Actually, we need campaign data for org_id. 
+        // Optimization: Let's delay log creation slightly or do it successfully. 
+        // FASTER: Just fetch DB, then create log in background.
+        // Current code had logPromise *dependent* on synchronous params.
+        // Let's stick to: Fetch DB -> Then Create Log (Background) -> Then WS Ready.
+
+        // Wait for DB Data first (needed for Prompt)
+        const [leadResult, campaignResult] = await dbFetchPromise;
 
         if (leadResult.error) throw new Error(`Lead error: ${leadResult.error.message}`);
         if (campaignResult.error) throw new Error(`Campaign error: ${campaignResult.error.message}`);
@@ -116,21 +156,16 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
         const campaign = campaignResult.data;
 
         console.log(`✅ [${callSid}] Data fetched: ${lead.name}, Campaign: ${campaign.name}`);
-        console.log(`🎤 [${callSid}] AI Voice: ${campaign.ai_voice || 'shimmer'}`);
 
-        // 2. Fetch Context & Create Log in Parallel with OpenAI Connection Setup
-        // We start fetching 'otherProjects' but don't await immediately if possible.
-        // Actually, 'createSessionUpdate' needs 'otherProjects'. So we must await it.
-
-        // Actually, 'createSessionUpdate' needs 'otherProjects'. So we must await it.
+        // 4. Fetch Extra Context (Projects) - Parallel to WS Wait
         const projectsPromise = supabase
             .from('projects')
             .select('name, description, status, location')
             .eq('organization_id', campaign.organization_id)
             .eq('status', 'active');
 
-        // Fire-and-forget Call Log creation (Critical speed optimization)
-        const logPromise = supabase
+        // 5. Create Call Log in Background NOW (since we have data)
+        const callLogPromise = supabase
             .from('call_logs')
             .insert({
                 organization_id: campaign.organization_id,
@@ -151,42 +186,26 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                 return data;
             });
 
-        // Wait for Projects (needed for prompt)
+        // 6. Wait for WS Open & Projects
+        await Promise.all([wsOpenPromise, projectsPromise]);
+        console.log(`✅ [${callSid}] OpenAI Connected & Data Ready!`);
+
         const { data: allProjects } = await projectsPromise;
         const otherProjects = allProjects || [];
 
-        // Await Call Log only for the ID variable if needed later (we can use a variable that resolves later)
-        // But for 'index.js', we use 'callLog' in close handlers. 
-        // We'll await it now to be safe, but it ran in parallel with Projects fetch.
-        const callLog = await logPromise;
+        // 7. Send Session Update IMMEDIATELY
+        const sessionUpdate = createSessionUpdate(lead, campaign, otherProjects);
+        realtimeWS.send(JSON.stringify(sessionUpdate));
 
-        // Connect to OpenAI Realtime API
-        console.log(`🔌 [${callSid}] Connecting to OpenAI Realtime API...`);
-        const realtimeWS = new WebSocket(
-            'wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview',
-            {
-                headers: {
-                    'Authorization': `Bearer ${OPENAI_API_KEY}`,
-                    'OpenAI-Beta': 'realtime=v1'
-                }
-            }
-        );
+        // 8. Force AI to speak (Reduced delay: 500ms -> 100ms)
+        setTimeout(() => {
+            realtimeWS.send(JSON.stringify({ type: 'response.create' }));
+        }, 100);
 
         let conversationTranscript = '';
 
-        realtimeWS.on('open', () => {
-            console.log(`✅ [${callSid}] OpenAI Realtime API connected!`);
-
-            setTimeout(() => {
-                const sessionUpdate = createSessionUpdate(lead, campaign, otherProjects);
-                realtimeWS.send(JSON.stringify(sessionUpdate));
-
-                // Force AI to speak ASAP (500ms to allow config to apply)
-                setTimeout(() => {
-                    realtimeWS.send(JSON.stringify({ type: 'response.create' }));
-                }, 500);
-            }, 50);
-        });
+        // Continue with event handlers... (Remove duplicate 'open' handler since we handled it)
+        // We attached a one-time listener for the promise. The socket is already open.
 
         realtimeWS.on('close', () => {
             console.log(`🔌 [${callSid}] OpenAI connection closed`);
@@ -224,6 +243,7 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                 console.log(`✅ [${callSid}] Transfer initiated:`, transferResponse);
 
                                 // ✅ Update Database Immediately for Dashboard Accuracy
+                                const callLog = await callLogPromise;
                                 if (callLog) {
                                     console.log(`💾 [${callSid}] Updating DB status to 'transferred'...`);
 
@@ -320,6 +340,7 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
 
                             try {
                                 // Update Database before disconnecting
+                                const callLog = await callLogPromise;
                                 if (callLog) {
                                     console.log(`💾 [${callSid}] Updating DB before disconnect...`);
 
@@ -465,6 +486,7 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
 
             // Save transcript
             // Save transcript
+            const callLog = await callLogPromise;
             if (callLog) {
                 console.log(`💾 [${callSid}] Saving transcript...`);
 

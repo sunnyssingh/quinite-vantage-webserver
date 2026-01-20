@@ -232,7 +232,37 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                             // Initialize Plivo Client
                             const plivoClient = new plivo.Client(process.env.PLIVO_AUTH_ID, process.env.PLIVO_AUTH_TOKEN);
 
-                            const transferNumber = process.env.PLIVO_TRANSFER_NUMBER || '+918035740007'; // Default support number
+                            // 1. DYNAMIC AGENT SELECTION (Round Robin / Random)
+                            let transferNumber = process.env.PLIVO_TRANSFER_NUMBER || '+918035740007'; // Fallback
+                            let agentName = 'Support';
+
+                            try {
+                                // Fetch all active agents in this organization
+                                const { data: agents, error: agentError } = await supabase
+                                    .from('profiles')
+                                    .select('phone, full_name, role')
+                                    .eq('organization_id', campaign.organization_id)
+                                    .not('phone', 'is', null) // Must have a phone number
+                                    .eq('role', 'employee'); // RESTRICTION: Only transfer to 'employee' role
+
+                                if (agentError) {
+                                    console.error(`⚠️ [${callSid}] Failed to fetch agents:`, agentError.message);
+                                } else if (agents && agents.length > 0) {
+                                    // 🎲 Pick a Random Agent (Simple Round Robin)
+                                    // Improvement: We could store 'last_call_at' to pick the idle one.
+                                    const randomAgent = agents[Math.floor(Math.random() * agents.length)];
+
+                                    if (randomAgent.phone) {
+                                        transferNumber = randomAgent.phone;
+                                        agentName = randomAgent.full_name || 'Sales Agent';
+                                        console.log(`🎯 [${callSid}] Selected Agent: ${agentName} (${transferNumber})`);
+                                    }
+                                } else {
+                                    console.warn(`⚠️ [${callSid}] No active agents found with phone numbers. Using Fallback.`);
+                                }
+                            } catch (lookupErr) {
+                                console.error(`❌ [${callSid}] Agent lookup crashed:`, lookupErr);
+                            }
 
                             try {
                                 const transferResponse = await plivoClient.calls.transfer(callSid, {

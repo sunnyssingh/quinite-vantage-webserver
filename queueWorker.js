@@ -68,12 +68,29 @@ async function executeCall(item) {
         const { data: lead } = await supabase.from('leads').select('phone, name').eq('id', lead_id).single();
         if (!lead || !lead.phone) throw new Error("Invalid Lead or Missing Phone");
 
+        // 1. Fetch Campaign & Org Settings for Caller ID
+        const { data: campaign } = await supabase
+            .from('campaigns')
+            .select('id, organization:organizations(caller_id), total_calls')
+            .eq('id', campaign_id)
+            .single();
+
+        // 2. Dynamic Caller ID Logic
+        // Prefer explicit column, fallback to Env Var
+        let callerId = campaign?.organization?.caller_id;
+
+        if (!callerId) {
+            console.warn(`⚠️  [WARNING] No Caller ID assigned for Org ${campaign?.organization?.id || 'Unknown'}. Using System Default.`);
+            callerId = PLIVO_PHONE_NUMBER;
+        }
+
         console.log(`📞 Dialing ${lead.name} (${lead.phone}) for Campaign ${campaign_id}...`);
+        console.log(`   📱 From: ${callerId}`);
 
         const answerUrl = `${WEBSOCKET_SERVER_URL}/answer?leadId=${lead_id}&campaignId=${campaign_id}`;
 
         const response = await plivoClient.calls.create(
-            PLIVO_PHONE_NUMBER,
+            callerId,
             lead.phone,
             answerUrl,
             { answer_method: 'POST', time_limit: 1800 }
@@ -91,7 +108,7 @@ async function executeCall(item) {
             call_date: new Date().toISOString()
         }).eq('id', lead_id);
 
-        const { data: campaign } = await supabase.from('campaigns').select('total_calls').eq('id', campaign_id).single();
+        // 3. Update Stats (using campaign data fetched in step 1)
         if (campaign) {
             await supabase.from('campaigns').update({
                 total_calls: (campaign.total_calls || 0) + 1

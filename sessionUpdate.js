@@ -203,6 +203,45 @@ You MUST disconnect the call immediately if:
                         },
                         required: ["reason"]
                     }
+                },
+                {
+                    type: "function",
+                    name: "update_lead_status",
+                    description: "Update the lead's status in the database (e.g., if they are qualified, or give a specific rejection reason like 'budget too high').",
+                    parameters: {
+                        type: "object",
+                        properties: {
+                            status: {
+                                type: "string",
+                                enum: ["contacted", "qualified", "lost", "converted"],
+                                description: "New general status of the lead"
+                            },
+                            reason: {
+                                type: "string",
+                                description: "Specific categorization e.g., 'budget_issue', 'location_mismatch', 'competitor', 'not_looking_now'"
+                            },
+                            notes: {
+                                type: "string",
+                                description: "Detailed notes aboute the update"
+                            }
+                        },
+                        required: ["status"]
+                    }
+                },
+                {
+                    type: "function",
+                    name: "schedule_callback",
+                    description: "Schedule a callback if the user asks to call later.",
+                    parameters: {
+                        type: "object",
+                        properties: {
+                            time: {
+                                type: "string",
+                                description: "The time user mentioned (e.g., 'tomorrow 5pm', 'next week'). AI should accept natural language."
+                            }
+                        },
+                        required: ["time"]
+                    }
                 }
             ]
         }

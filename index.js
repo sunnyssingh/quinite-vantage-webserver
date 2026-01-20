@@ -412,6 +412,68 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                 realtimeWS.send(JSON.stringify(errorItem));
                             }
                         }
+
+                        // Handle update_lead_status tool
+                        if (response.name === 'update_lead_status') {
+                            const args = JSON.parse(response.arguments);
+                            console.log(`📝 [${callSid}] Updating Status: ${args.status} (${args.reason})`);
+
+                            try {
+                                const updatePayload = {
+                                    status: args.status,
+                                    call_status: 'called', // Keep as called unless converted
+                                    rejection_reason: args.reason || null,
+                                    notes: args.notes || null
+                                };
+
+                                await supabase.from('leads').update(updatePayload).eq('id', leadId);
+                                console.log(`✅ [${callSid}] Lead status updated`);
+
+                                const outputItem = {
+                                    type: "conversation.item.create",
+                                    item: {
+                                        type: "function_call_output",
+                                        call_id: response.call_id,
+                                        output: JSON.stringify({ success: true, message: "Lead status updated." })
+                                    }
+                                };
+                                realtimeWS.send(JSON.stringify(outputItem));
+                                realtimeWS.send(JSON.stringify({ type: "response.create" })); // Trigger AI confirmation
+
+                            } catch (err) {
+                                console.error(`❌ [${callSid}] Update Status Error:`, err);
+                            }
+                        }
+
+                        // Handle schedule_callback tool
+                        if (response.name === 'schedule_callback') {
+                            const args = JSON.parse(response.arguments);
+                            console.log(`📅 [${callSid}] Scheduling Callback: ${args.time}`);
+
+                            try {
+                                await supabase.from('leads').update({
+                                    waiting_status: 'callback_scheduled',
+                                    callback_time: new Date().toISOString(), // In a real app, parse args.time to specific Date
+                                    notes: `Callback requested: ${args.time}`
+                                }).eq('id', leadId);
+
+                                console.log(`✅ [${callSid}] Callback scheduled`);
+
+                                const outputItem = {
+                                    type: "conversation.item.create",
+                                    item: {
+                                        type: "function_call_output",
+                                        call_id: response.call_id,
+                                        output: JSON.stringify({ success: true, message: `Callback set for ${args.time}` })
+                                    }
+                                };
+                                realtimeWS.send(JSON.stringify(outputItem));
+                                realtimeWS.send(JSON.stringify({ type: "response.create" }));
+
+                            } catch (err) {
+                                console.error(`❌ [${callSid}] Callback Schedule Error:`, err);
+                            }
+                        }
                         break;
 
                     case 'input_audio_buffer.speech_started':

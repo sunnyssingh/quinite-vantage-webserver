@@ -17,12 +17,11 @@ export const createSessionUpdate = (lead, campaign, otherProjects = []) => {
             -------------------------------- */
             turn_detection: {
                 type: "server_vad",
-                // 0.75: Good balance for traffic vs faint speech
-                threshold: 0.75,
+                // 0.6: More sensitive to capture start of speech
+                threshold: 0.6,
                 prefix_padding_ms: 300,
-                // 1000ms: More patient. Waits 1s after user stops before replying.
-                // Prevents cutting off user during thinking pauses.
-                silence_duration_ms: 1000
+                // 500ms: Faster response (more conversational), was 1000ms
+                silence_duration_ms: 500
             },
 
             input_audio_format: "g711_ulaw",

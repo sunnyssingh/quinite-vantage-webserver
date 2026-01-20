@@ -87,7 +87,8 @@ async function executeCall(item) {
         console.log(`📞 Dialing ${lead.name} (${lead.phone}) for Campaign ${campaign_id}...`);
         console.log(`   📱 From: ${callerId}`);
 
-        const answerUrl = `${WEBSOCKET_SERVER_URL}/answer?leadId=${lead_id}&campaignId=${campaign_id}`;
+        // CORRECTION: Point to Next.js App for the XML Answer, not the WS Server
+        const answerUrl = `${NEXT_PUBLIC_SITE_URL}/api/webhooks/plivo/answer?leadId=${lead_id}&campaignId=${campaign_id}`;
 
         const response = await plivoClient.calls.create(
             callerId,

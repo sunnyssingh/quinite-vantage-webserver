@@ -68,7 +68,7 @@ export const OpenAIService = {
     /**
      * 2. LLM: Generate Response using GPT-4o-mini
      */
-    async generateResponse(systemPrompt, history, userText) {
+    async generateResponse(systemPrompt, history, userText, tools = []) {
         console.log(`🧠 [OpenAIService] Generating Response for: "${userText}"`);
         try {
             const messages = [
@@ -77,19 +77,32 @@ export const OpenAIService = {
                 { role: "user", content: userText }
             ];
 
-            const completion = await openai.chat.completions.create({
+            const params = {
                 model: "gpt-4o-mini",
                 messages: messages,
                 max_tokens: 150,
-            });
+            };
 
-            const result = completion.choices[0].message.content;
-            console.log(`   -> LLM Output: "${result}"`);
-            return result;
+            if (tools && tools.length > 0) {
+                params.tools = tools;
+                params.tool_choice = "auto";
+            }
+
+            const completion = await openai.chat.completions.create(params);
+
+            const message = completion.choices[0].message;
+
+            if (message.tool_calls) {
+                console.log(`   -> LLM Tool Call: ${JSON.stringify(message.tool_calls)}`);
+            } else {
+                console.log(`   -> LLM Output: "${message.content}"`);
+            }
+
+            return message;
         } catch (error) {
             console.error("LLM Error:", error);
-            // Fallback response
-            return "Sorry, I didn't catch that properly.";
+            // Fallback response object
+            return { role: 'assistant', content: "Sorry, I didn't catch that properly." };
         }
     },
 

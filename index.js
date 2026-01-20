@@ -18,7 +18,7 @@ const wss = new WebSocketServer({ noServer: true });
 const PORT = parseInt(process.env.PORT) || 10000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 // Create Supabase client
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -389,20 +389,26 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                 }
 
                                 // Update Lead Status based on disconnect reason
-                                const leadStatus = args.reason === 'not_interested' ? 'not_interested' :
-                                    args.reason === 'abusive_language' ? 'do_not_call' :
-                                        args.reason === 'wrong_number' ? 'wrong_number' : 'failed';
+                                const normalizedReason = (args.reason || 'other').toLowerCase().replace(' ', '_');
+                                const leadStatus = normalizedReason.includes('not_interested') ? 'not_interested' :
+                                    normalizedReason.includes('abusive') ? 'do_not_call' :
+                                        normalizedReason.includes('wrong') ? 'wrong_number' : 'failed';
 
-                                await supabase
+                                const { error: leadError } = await supabase
                                     .from('leads')
                                     .update({
                                         status: leadStatus,
                                         call_status: 'disconnected',
-                                        disconnect_reason: args.reason
+                                        disconnect_reason: args.reason,
+                                        rejection_reason: args.reason // Also save to rejection_reason for visibility
                                     })
                                     .eq('id', leadId);
 
-                                console.log(`✅ [${callSid}] Lead status updated to: ${leadStatus}`);
+                                if (leadError) {
+                                    console.error(`❌ [${callSid}] Lead status update FAILED:`, leadError);
+                                } else {
+                                    console.log(`✅ [${callSid}] Lead status updated to: ${leadStatus} (Reason: ${args.reason})`);
+                                }
 
                                 // Send function output to AI
                                 const disconnectItem = {
@@ -590,7 +596,8 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                     .single();
 
                 const isTransferred = currentLog?.transferred || false;
-                const finalStatus = isTransferred ? 'transferred' : 'completed';
+                // If expected status wasn't set by a tool, default to 'contacted' so we know we spoke.
+                const finalStatus = isTransferred ? 'transferred' : (currentLog?.call_status === 'in_progress' ? 'completed' : currentLog?.call_status);
 
                 const { error: updateError } = await supabase
                     .from('call_logs')

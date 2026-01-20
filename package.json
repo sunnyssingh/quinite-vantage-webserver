@@ -5,7 +5,9 @@
     "main": "index.js",
     "type": "module",
     "scripts": {
-        "start": "node index.js"
+        "start": "node index.js",
+        "worker": "node queueWorker.js",
+        "dev": "node index.js"
     },
     "dependencies": {
         "@ricky0123/vad-node": "^0.0.3",

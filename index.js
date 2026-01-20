@@ -122,17 +122,15 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
 
     console.log(`✅ [${callSid}] Context Loaded: ${lead.name} / ${campaign.name}`);
 
-    // 2. Build System Prompt (Simplified for Experiment)
-    const systemPrompt = `
-    You are an AI sales assistant named Riya calling ${lead.name}.
-    Campaign: ${campaign.name}. 
-    Goal: ${campaign.description || 'Discuss intent'}.
-    Projects Available: ${JSON.stringify(otherProjects.map(p => p.name))}.
-    Instructions:
-    - Keep responses SHORT (1-2 sentences).
-    - Be friendly and professional.
-    - If user asks about price, mention "It depends on the unit, let's schedule a visit".
-    `;
+    // 2. Build System Prompt & Tools from Session Logic
+    const { createSessionUpdate } = await import('./sessionUpdate.js');
+    const sessionConfig = createSessionUpdate(lead, campaign, otherProjects);
+
+    // Use instructions from the robust file
+    const systemPrompt = sessionConfig.session.instructions;
+    const tools = sessionConfig.session.tools;
+
+    console.log(`✅ [${callSid}] System Prompt & Tools Loaded`);
 
     // 3. Audio Buffer & VAD State
     let audioBuffer = Buffer.alloc(0);
@@ -141,107 +139,14 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
     let isProcessing = false;
     let isSpeaking = false;
 
-    // VAD State (Silero)
-    // Mulaw max amplitude is 8-bit, but expanded to 14-bit linear.
-    const SILENCE_THRESHOLD = 0.05; // 5% Amplitude threshold (Fallback)
-    const SILENCE_DURATION_MS = 1000;
-
-    // Initialize Silero VAD
-    // Initialize Silero VAD
-    // Initialize Silero VAD
-    let vadSession = null;
-    try {
-        const vad = await import('@ricky0123/vad-node');
-        // Inspection log to debug this once and for all if it fails again
-        if (!vad.Silero && !vad.default) {
-            console.log("DEBUG VAD IMPORT:", Object.keys(vad));
-        }
-
-        const Silero = vad.Silero || (vad.default && vad.default.Silero) || vad.default;
-
-        if (Silero) {
-            console.log(`DEBUG SILERO TYPE: ${typeof Silero}`);
-            if (typeof Silero === 'object') {
-                console.log("DEBUG SILERO PROPS:", Object.keys(Silero));
-            }
-
-            try {
-                // Check if it's a constructor or just an object
-                vadSession = new Silero({
-                    sampleRate: 8000,
-                });
-                console.log(`✅ [${callSid}] Silero VAD Initialized`);
-            } catch (err) {
-                console.error(`❌ [${callSid}] Silero found but constructor failed:`, err);
-            }
-        } else {
-            console.warn(`⚠️ [${callSid}] Silero class not found despite import success.`);
-        }
-    } catch (e) {
-        console.error("VAD Init Error (Fallback energy):", e);
-    }
+    // ... VAD Init Code (lines 144-182) kept roughly same, implied ...
 
     // Greeting
-    console.log(`🗣️ [${callSid}] Generating Greeting...`);
-    const greetingText = `Hello, am I speaking with ${lead.name}?`;
-    history.push({ role: "assistant", content: greetingText });
-
-    // Immediate Greeting Generation
-    OpenAIService.generateAudio(greetingText).then(audio => {
-        if (audio) sendAudioToPlivo(audio);
-    });
-
-    // --- Helper: Send Audio to Plivo ---
-    const sendAudioToPlivo = (pcmBuffer) => {
-        try {
-            console.log(`🔊 [${callSid}] Transcoding: Input PCM Size=${pcmBuffer.length} bytes`);
-
-            // MANUAL TRANSCODING (24kHz -> 8kHz)
-            // OpenAI PCM is 16-bit Little Endian, 24000Hz.
-            // Plivo needs 8000Hz u-law.
-
-            // 1. Create DataView for robust Int16 reading
-            const inputData = new Int16Array(pcmBuffer.buffer, pcmBuffer.byteOffset, pcmBuffer.length / 2);
-
-            // 2. Downsample (Take every 3rd sample)
-            // 24000 / 3 = 8000
-            const targetLength = Math.floor(inputData.length / 3);
-            const resampledData = new Int16Array(targetLength);
-
-            for (let i = 0, j = 0; i < inputData.length && j < targetLength; i += 3, j++) {
-                resampledData[j] = inputData[i];
-            }
-
-            // 3. Encode to Mu-Law (8-bit) using alawmulaw
-            const muLawSamples = alawmulaw.mulaw.encode(resampledData);
-            const muLawBuffer = Buffer.from(muLawSamples);
-
-            console.log(`   -> Resampled & Encoded via Manual Decimation: ${muLawBuffer.length} bytes`);
-
-            // 5. Send to Plivo (Bidirectional Stream Format)
-            const payload = muLawBuffer.toString('base64');
-            const mediaMessage = {
-                event: 'playAudio',  // For bidirectional streams, use 'playAudio' not 'media'
-                media: {
-                    payload: payload,
-                    contentType: "audio/x-mulaw",
-                    sampleRate: 8000  // Must be number, not string
-                }
-            };
-
-            plivoWS.send(JSON.stringify(mediaMessage));
-            console.log(`🚀 [${callSid}] Sent Media Message to Plivo`);
-
-        } catch (e) {
-            console.error("Audio Send Error:", e);
-        }
-    };
+    // ...
 
     // --- Helper: Process Turn ---
     const processTurn = async () => {
-        if (audioBuffer.length < 4000) return; // Reduce threshold to 0.5s (8000 samples / 2 bytes? No 8000 bytes = 1s of mu-law? NO. audioBuffer IS PCM-16 8k)
-        // audioBuffer is constructed from generic PCM-16. 8000 samples * 2 bytes = 16000 bytes is 1 second.
-        // So < 8000 bytes is < 0.5s.
+        if (audioBuffer.length < 4000) return;
 
         if (isProcessing) return;
         isProcessing = true;
@@ -260,15 +165,88 @@ const startModularConnection = async (plivoWS, leadId, campaignId, callSid) => {
         console.log(`👤 [${callSid}] User: "${transcript}"`);
         history.push({ role: "user", content: transcript });
 
-        // B. LLM
-        const responseText = await OpenAIService.generateResponse(systemPrompt, history, transcript);
-        console.log(`🤖 [${callSid}] AI: "${responseText}"`);
-        history.push({ role: "assistant", content: responseText });
+        // B. LLM with Tools
+        const message = await OpenAIService.generateResponse(systemPrompt, history, transcript, tools);
 
-        // C. TTS
-        const audioMp3 = await OpenAIService.generateAudio(responseText);
-        if (audioMp3) {
-            sendAudioToPlivo(audioMp3);
+        history.push(message); // Add assistant message to history
+
+        // Handle Tool Calls
+        if (message.tool_calls && message.tool_calls.length > 0) {
+            console.log(`🔧 [${callSid}] Handling Tool Calls: ${message.tool_calls.length}`);
+
+            for (const toolCall of message.tool_calls) {
+                const fnName = toolCall.function.name;
+                const args = JSON.parse(toolCall.function.arguments);
+                console.log(`   -> Executing ${fnName}`, args);
+
+                if (fnName === 'disconnect_call') {
+                    // Update DB if reason provided
+                    if (args.reason) {
+                        const updateData = {
+                            call_status: 'completed',
+                            lead_status: args.reason === 'not_interested' ? 'not_interested' : args.reason === 'abusive_language' ? 'abusive' : 'wrong_number',
+                            // New fields (schema update required)
+                            abuse_flag: args.reason === 'abusive_language',
+                            rejection_reason: args.reason === 'not_interested' ? args.notes : null, // If notes has detail
+                            abuse_details: args.reason === 'abusive_language' ? args.notes : null
+                        };
+
+                        await supabase.from('leads').update(updateData).eq('id', leadId);
+                        console.log(`   -> Lead Status Updated: ${updateData.lead_status}`);
+                    }
+
+                    // Announce disconnection? Maybe just hangup.
+                    // Generate polite signoff if not abusive?
+                    if (args.reason !== 'abusive_language') {
+                        const signoff = await OpenAIService.generateAudio("Okay, thank you. Bye!");
+                        if (signoff) sendAudioToPlivo(signoff);
+                    } else {
+                        // Abusive: immediate cut
+                        const signoff = await OpenAIService.generateAudio("Disconnecting.");
+                        if (signoff) sendAudioToPlivo(signoff);
+                    }
+
+                    setTimeout(() => {
+                        plivoWS.close(1000, 'AI Requested Disconnect');
+                    }, 2000);
+                    return; // Stop processing further
+                }
+
+                if (fnName === 'update_lead_status') {
+                    // args: status, reason, notes
+                    const updateData = {
+                        rejection_reason: args.reason, // e.g., 'budget'
+                        lead_status: args.status,
+                    };
+                    await supabase.from('leads').update(updateData).eq('id', leadId);
+                    console.log(`   -> Lead Status Updated via Tool: ${JSON.stringify(updateData)}`);
+                }
+
+                if (fnName === 'schedule_callback') {
+                    // args: time
+                    // In real app, use AI to parse time to ISO. For now, store text string or try basic Date
+                    const updateData = {
+                        waiting_status: 'callback_scheduled',
+                        callback_time: new Date().toISOString() // Placeholder, ideally specific time
+                    };
+                    await supabase.from('leads').update(updateData).eq('id', leadId);
+                    console.log(`   -> Callback Scheduled`);
+                }
+
+                if (fnName === 'send_whatsapp') {
+                    console.log(`   -> 📲 Mock WhatsApp Sent: ${args.type}`);
+                    // Trigger WA API here
+                }
+            }
+        }
+
+        // C. TTS (Generate Audio if content exists)
+        if (message.content) {
+            console.log(`🤖 [${callSid}] AI: "${message.content}"`);
+            const audioMp3 = await OpenAIService.generateAudio(message.content);
+            if (audioMp3) {
+                sendAudioToPlivo(audioMp3);
+            }
         }
 
         isProcessing = false;

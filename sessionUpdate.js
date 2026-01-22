@@ -17,11 +17,11 @@ export const createSessionUpdate = (lead, campaign, otherProjects = []) => {
             -------------------------------- */
             turn_detection: {
                 type: "server_vad",
-                // 0.6: More sensitive to capture start of speech
-                threshold: 0.6,
-                prefix_padding_ms: 300,
-                // 500ms: Faster response (more conversational), was 1000ms
-                silence_duration_ms: 500
+                // 0.5: More sensitive for faster detection
+                threshold: 0.5,
+                prefix_padding_ms: 200,
+                // 400ms: Faster turn-taking for natural conversation
+                silence_duration_ms: 400
             },
 
             input_audio_format: "g711_ulaw",
@@ -39,10 +39,11 @@ You are **Riya**, a friendly and casual ${campaign?.organization?.name || 'real 
 ━━━━━━━━━━━━━━━━━━━━━━
 ⚡ CRITICAL INSTRUCTIONS
 ━━━━━━━━━━━━━━━━━━━━━━
-1. **SPEAK FAST**: Keep a brisk, energetic pace.
-2. **BE HUMAN**: Use natural fillers ("umm", "like", "hmmm", "achha") and break your words naturally.
-3. **TIME LIMIT**: booking/transfer goal in **1 minute 30 seconds**.
-4. **NOISE HANDLING**: If you hear traffic/noise, speak clearly and concise. If you didn't hear, ask "Sorry, thoda shor hai, please repeat?"
+1. **SPEAK NATURALLY**: Talk like a real person - use fillers ("umm", "haan", "achha", "dekho"), pause mid-sentence, overlap slightly.
+2. **BE CONVERSATIONAL**: Don't wait for complete silence. Jump in naturally like humans do. Interrupt politely if needed.
+3. **QUICK RESPONSES**: Respond immediately when you understand - don't wait. Say "Haan haan" or "Achha" while they're talking.
+4. **TIME LIMIT**: Qualify and transfer/close in **90 seconds**.
+5. **NOISE HANDLING**: If unclear, say "Sorry? Kya kaha aapne?" immediately.
 
 ━━━━━━━━━━━━━━━━━━━━━━
 � STRICT FEMALE GRAMMAR (CRITICAL)

@@ -197,10 +197,10 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
         const sessionUpdate = createSessionUpdate(lead, campaign, otherProjects);
         realtimeWS.send(JSON.stringify(sessionUpdate));
 
-        // 8. Force AI to speak (Reduced delay: 500ms -> 100ms)
+        // 8. Force AI to speak IMMEDIATELY (Optimized: 100ms -> 50ms)
         setTimeout(() => {
             realtimeWS.send(JSON.stringify({ type: 'response.create' }));
-        }, 100);
+        }, 50);
 
         let conversationTranscript = '';
 
@@ -361,9 +361,8 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                         // Handle disconnect_call tool
                         if (response.name === 'disconnect_call') {
                             const args = JSON.parse(response.arguments);
-                            console.log(`🚫 [${callSid}] AI Disconnecting Call - Reason: ${args.reason} (${args.notes || 'No notes'})`)
-
-                                ;
+                            console.log(`🚫 [${callSid}] AI Disconnecting Call - Reason: ${args.reason}`);
+                            console.log(`📝 [${callSid}] Notes: ${args.notes || 'No notes provided'}`);
 
                             // Initialize Plivo Client
                             const plivoClient = new plivo.Client(process.env.PLIVO_AUTH_ID, process.env.PLIVO_AUTH_TOKEN);
@@ -372,42 +371,46 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                 // Update Database before disconnecting
                                 const callLog = await callLogPromise;
                                 if (callLog) {
-                                    console.log(`💾 [${callSid}] Updating DB before disconnect...`);
+                                    console.log(`💾 [${callSid}] Updating call log with disconnect details...`);
 
-                                    // Update Call Log
+                                    // Update Call Log with comprehensive notes
                                     await supabase
                                         .from('call_logs')
                                         .update({
                                             call_status: 'disconnected',
                                             disconnect_reason: args.reason,
-                                            disconnect_notes: args.notes || '',
+                                            notes: args.notes || '',
                                             ended_at: new Date().toISOString()
                                         })
                                         .eq('id', callLog.id);
 
-                                    console.log(`✅ [${callSid}] Call log updated with disconnect reason`);
+                                    console.log(`✅ [${callSid}] Call log updated successfully`);
                                 }
 
                                 // Update Lead Status based on disconnect reason
-                                const normalizedReason = (args.reason || 'other').toLowerCase().replace(' ', '_');
-                                const leadStatus = normalizedReason.includes('not_interested') ? 'not_interested' :
+                                const normalizedReason = (args.reason || 'other').toLowerCase().replace(/\s+/g, '_');
+                                const leadStatus = normalizedReason.includes('not_interested') ? 'lost' :
                                     normalizedReason.includes('abusive') ? 'do_not_call' :
-                                        normalizedReason.includes('wrong') ? 'wrong_number' : 'failed';
+                                        normalizedReason.includes('wrong') ? 'invalid' : 'contacted';
+
+                                // Prepare lead update with detailed notes
+                                const leadUpdatePayload = {
+                                    status: leadStatus,
+                                    call_status: 'completed',
+                                    rejection_reason: args.reason,
+                                    notes: args.notes || `Call ended: ${args.reason}`
+                                };
 
                                 const { error: leadError } = await supabase
                                     .from('leads')
-                                    .update({
-                                        status: leadStatus,
-                                        call_status: 'disconnected',
-                                        disconnect_reason: args.reason,
-                                        rejection_reason: args.reason // Also save to rejection_reason for visibility
-                                    })
+                                    .update(leadUpdatePayload)
                                     .eq('id', leadId);
 
                                 if (leadError) {
                                     console.error(`❌ [${callSid}] Lead status update FAILED:`, leadError);
                                 } else {
-                                    console.log(`✅ [${callSid}] Lead status updated to: ${leadStatus} (Reason: ${args.reason})`);
+                                    console.log(`✅ [${callSid}] Lead updated: ${leadStatus} | Reason: ${args.reason}`);
+                                    console.log(`📋 [${callSid}] Notes saved: ${args.notes || 'None'}`);
                                 }
 
                                 // Send function output to AI
@@ -416,33 +419,36 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                     item: {
                                         type: "function_call_output",
                                         call_id: response.call_id,
-                                        output: JSON.stringify({ success: true, message: "Call will be disconnected." })
+                                        output: JSON.stringify({ success: true, message: "Database updated. Ending call now." })
                                     }
                                 };
                                 realtimeWS.send(JSON.stringify(disconnectItem));
 
-                                // Hangup the call after a short delay (let AI finish goodbye)
+                                // Trigger AI to say final goodbye
+                                realtimeWS.send(JSON.stringify({ type: "response.create" }));
+
+                                // Hangup the call after allowing AI to finish
                                 setTimeout(async () => {
                                     try {
                                         await plivoClient.calls.hangup(callSid);
                                         console.log(`✅ [${callSid}] Call disconnected successfully`);
                                     } catch (hangupErr) {
-                                        console.error(`❌ [${callSid}] Hangup failed:`, hangupErr);
+                                        console.error(`❌ [${callSid}] Hangup failed:`, hangupErr.message);
                                     }
 
                                     // Close WebSocket connections
                                     if (realtimeWS.readyState === WebSocket.OPEN) realtimeWS.close();
                                     if (plivoWS.readyState === WebSocket.OPEN) plivoWS.close();
-                                }, 3000); // 3 second delay to let AI say goodbye
+                                }, 4000); // 4 second delay for proper goodbye
 
                             } catch (err) {
-                                console.error(`❌ [${callSid}] Disconnect failed:`, err);
+                                console.error(`❌ [${callSid}] Disconnect handler error:`, err);
                                 const errorItem = {
                                     type: "conversation.item.create",
                                     item: {
                                         type: "function_call_output",
                                         call_id: response.call_id,
-                                        output: JSON.stringify({ success: false, error: "Failed to disconnect call." })
+                                        output: JSON.stringify({ success: false, error: "Failed to disconnect properly." })
                                     }
                                 };
                                 realtimeWS.send(JSON.stringify(errorItem));
@@ -452,32 +458,70 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                         // Handle update_lead_status tool
                         if (response.name === 'update_lead_status') {
                             const args = JSON.parse(response.arguments);
-                            console.log(`📝 [${callSid}] Updating Status: ${args.status} (${args.reason})`);
+                            console.log(`📝 [${callSid}] Updating Lead Status: ${args.status}`);
+                            console.log(`📋 [${callSid}] Reason: ${args.reason || 'Not specified'}`);
+                            console.log(`📄 [${callSid}] Notes: ${args.notes || 'None'}`);
 
                             try {
+                                // Build comprehensive update payload
                                 const updatePayload = {
                                     status: args.status,
-                                    call_status: 'called', // Keep as called unless converted
+                                    call_status: args.status === 'converted' ? 'converted' : 'contacted',
                                     rejection_reason: args.reason || null,
                                     notes: args.notes || null
                                 };
 
-                                await supabase.from('leads').update(updatePayload).eq('id', leadId);
-                                console.log(`✅ [${callSid}] Lead status updated`);
+                                const { error: updateError } = await supabase
+                                    .from('leads')
+                                    .update(updatePayload)
+                                    .eq('id', leadId);
+
+                                if (updateError) {
+                                    console.error(`❌ [${callSid}] Lead update failed:`, updateError);
+                                    throw updateError;
+                                }
+
+                                console.log(`✅ [${callSid}] Lead status updated successfully`);
+                                console.log(`   Status: ${args.status}`);
+                                console.log(`   Reason: ${args.reason || 'N/A'}`);
+                                console.log(`   Notes: ${args.notes || 'N/A'}`);
+
+                                // Also update call log with this information
+                                const callLog = await callLogPromise;
+                                if (callLog) {
+                                    await supabase
+                                        .from('call_logs')
+                                        .update({
+                                            notes: (args.notes || '') + (args.reason ? ` | Reason: ${args.reason}` : '')
+                                        })
+                                        .eq('id', callLog.id);
+                                }
 
                                 const outputItem = {
                                     type: "conversation.item.create",
                                     item: {
                                         type: "function_call_output",
                                         call_id: response.call_id,
-                                        output: JSON.stringify({ success: true, message: "Lead status updated." })
+                                        output: JSON.stringify({
+                                            success: true,
+                                            message: "Lead status and notes saved successfully."
+                                        })
                                     }
                                 };
                                 realtimeWS.send(JSON.stringify(outputItem));
-                                realtimeWS.send(JSON.stringify({ type: "response.create" })); // Trigger AI confirmation
+                                // Don't auto-trigger response - let AI decide next action
 
                             } catch (err) {
                                 console.error(`❌ [${callSid}] Update Status Error:`, err);
+                                const errorItem = {
+                                    type: "conversation.item.create",
+                                    item: {
+                                        type: "function_call_output",
+                                        call_id: response.call_id,
+                                        output: JSON.stringify({ success: false, error: err.message })
+                                    }
+                                };
+                                realtimeWS.send(JSON.stringify(errorItem));
                             }
                         }
 

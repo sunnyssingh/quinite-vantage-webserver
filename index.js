@@ -197,10 +197,20 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
         const sessionUpdate = createSessionUpdate(lead, campaign, otherProjects);
         realtimeWS.send(JSON.stringify(sessionUpdate));
 
-        // 8. Force AI to speak IMMEDIATELY (Optimized: 100ms -> 50ms)
+        // 8. Force AI to speak (Balanced: Fast but stable at 200ms)
         setTimeout(() => {
-            realtimeWS.send(JSON.stringify({ type: 'response.create' }));
-        }, 50);
+            if (realtimeWS.readyState === 1) { // 1 = OPEN
+                console.log(`🎤 [${callSid}] Triggering AI greeting...`);
+                realtimeWS.send(JSON.stringify({ type: 'response.create' }));
+            } else {
+                console.warn(`⚠️  [${callSid}] WebSocket not ready, retrying in 100ms...`);
+                setTimeout(() => {
+                    if (realtimeWS.readyState === 1) {
+                        realtimeWS.send(JSON.stringify({ type: 'response.create' }));
+                    }
+                }, 100);
+            }
+        }, 200);
 
         let conversationTranscript = '';
 

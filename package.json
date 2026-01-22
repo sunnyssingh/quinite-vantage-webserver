@@ -5,24 +5,16 @@
     "main": "index.js",
     "type": "module",
     "scripts": {
-<<<<<<< HEAD
         "start": "concurrently \"node index.js\" \"node queueWorker.js\"",
         "server": "node index.js",
-        "worker": "node queueWorker.js"
-=======
-        "start": "node index.js",
         "worker": "node queueWorker.js",
         "dev": "node index.js"
->>>>>>> feature/call-flow-updates
     },
     "dependencies": {
         "@ricky0123/vad-node": "^0.0.3",
         "@supabase/supabase-js": "^2.39.0",
-<<<<<<< HEAD
-        "concurrently": "^9.2.1",
-=======
         "alawmulaw": "^6.0.0",
->>>>>>> feature/call-flow-updates
+        "concurrently": "^9.2.1",
         "dotenv": "^16.4.5",
         "express": "^4.21.1",
         "openai": "^6.16.0",

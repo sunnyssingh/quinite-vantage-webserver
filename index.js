@@ -157,14 +157,29 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
 
         console.log(`✅ [${callSid}] Data fetched: ${lead.name}, Campaign: ${campaign.name}`);
 
-        // 4. Fetch Extra Context (Projects) - Parallel to WS Wait
-        const projectsPromise = supabase
+        // 4. DON'T wait for projects - Send Session Update IMMEDIATELY with minimal data
+        console.log(`⚡ [${callSid}] Sending session update (fast path)...`);
+        const quickSessionUpdate = createSessionUpdate(lead, campaign, []); // Empty projects for speed
+        realtimeWS.send(JSON.stringify(quickSessionUpdate));
+
+        // 5. Trigger AI greeting IMMEDIATELY (no delay!)
+        console.log(`🎤 [${callSid}] Triggering AI greeting NOW...`);
+        realtimeWS.send(JSON.stringify({ type: 'response.create' }));
+
+        // 6. Fetch projects in background (optional enhancement)
+        supabase
             .from('projects')
             .select('name, description, status, location')
             .eq('organization_id', campaign.organization_id)
-            .eq('status', 'active');
+            .eq('status', 'active')
+            .then(({ data }) => {
+                if (data && data.length > 0) {
+                    console.log(`📋 [${callSid}] Loaded ${data.length} other projects (background)`);
+                    // Could update session here if needed, but not critical for first response
+                }
+            });
 
-        // 5. Create Call Log in Background NOW (since we have data)
+        // 7. Create Call Log in Background (fire-and-forget)
         const callLogPromise = supabase
             .from('call_logs')
             .insert({
@@ -185,32 +200,6 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                 else console.log(`✅ [${callSid}] Log Created: ${data.id}`);
                 return data;
             });
-
-        // 6. Wait for WS Open & Projects
-        await Promise.all([wsOpenPromise, projectsPromise]);
-        console.log(`✅ [${callSid}] OpenAI Connected & Data Ready!`);
-
-        const { data: allProjects } = await projectsPromise;
-        const otherProjects = allProjects || [];
-
-        // 7. Send Session Update IMMEDIATELY
-        const sessionUpdate = createSessionUpdate(lead, campaign, otherProjects);
-        realtimeWS.send(JSON.stringify(sessionUpdate));
-
-        // 8. Force AI to speak (Balanced: Fast but stable at 200ms)
-        setTimeout(() => {
-            if (realtimeWS.readyState === 1) { // 1 = OPEN
-                console.log(`🎤 [${callSid}] Triggering AI greeting...`);
-                realtimeWS.send(JSON.stringify({ type: 'response.create' }));
-            } else {
-                console.warn(`⚠️  [${callSid}] WebSocket not ready, retrying in 100ms...`);
-                setTimeout(() => {
-                    if (realtimeWS.readyState === 1) {
-                        realtimeWS.send(JSON.stringify({ type: 'response.create' }));
-                    }
-                }, 100);
-            }
-        }, 200);
 
         let conversationTranscript = '';
 

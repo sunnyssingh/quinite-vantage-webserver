@@ -13,7 +13,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const PLIVO_AUTH_ID = process.env.PLIVO_AUTH_ID;
 const PLIVO_AUTH_TOKEN = process.env.PLIVO_AUTH_TOKEN;
 const PLIVO_PHONE_NUMBER = process.env.PLIVO_PHONE_NUMBER;
-const WEBSOCKET_SERVER_URL = process.env.WEBSOCKET_SERVER_URL || 'https://vantage-websocket.onrender.com'; // Adjust default
+const WEBSOCKET_SERVER_URL = process.env.WEBSOCKET_SERVER_URL || 'https://vantage-websocket-server.up.railway.app'; // Adjust default
 const NEXT_PUBLIC_SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY || !PLIVO_AUTH_ID || !PLIVO_AUTH_TOKEN) {

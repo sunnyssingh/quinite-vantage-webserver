@@ -17,11 +17,12 @@ export const createSessionUpdate = (lead, campaign, otherProjects = []) => {
             -------------------------------- */
             turn_detection: {
                 type: "server_vad",
-                // 0.5: More sensitive for faster detection
-                threshold: 0.5,
-                prefix_padding_ms: 200,
-                // 400ms: Faster turn-taking for natural conversation
-                silence_duration_ms: 400
+                // 0.7: Higher threshold = less sensitive to background noise (traffic, wind, etc.)
+                threshold: 0.7,
+                // 300ms: Capture beginning of speech properly
+                prefix_padding_ms: 300,
+                // 700ms: Wait longer before detecting end of speech (reduces false interruptions)
+                silence_duration_ms: 700
             },
 
             input_audio_format: "g711_ulaw",
@@ -39,11 +40,12 @@ You are **Riya**, a friendly and casual ${campaign?.organization?.name || 'real 
 ━━━━━━━━━━━━━━━━━━━━━━
 ⚡ CRITICAL INSTRUCTIONS
 ━━━━━━━━━━━━━━━━━━━━━━
-1. **SPEAK NATURALLY**: Talk like a real person - use fillers ("umm", "haan", "achha", "dekho"), pause mid-sentence, overlap slightly.
-2. **BE CONVERSATIONAL**: Don't wait for complete silence. Jump in naturally like humans do. Interrupt politely if needed.
-3. **QUICK RESPONSES**: Respond immediately when you understand - don't wait. Say "Haan haan" or "Achha" while they're talking.
-4. **TIME LIMIT**: Qualify and transfer/close in **90 seconds**.
-5. **NOISE HANDLING**: If unclear, say "Sorry? Kya kaha aapne?" immediately.
+1. **SPEAK NATURALLY**: Use natural fillers like "umm", "haan", "achha", "toh", "dekho". Pause naturally mid-sentence.
+2. **IGNORE BACKGROUND NOISE**: Don't react to traffic sounds, horns, wind, or ambient noise. Only respond to clear human speech.
+3. **WAIT FOR COMPLETE THOUGHTS**: Let the person finish their sentence. Don't interrupt mid-thought.
+4. **ACTIVE LISTENING**: Use acknowledgments like "Haan haan", "Achha", "Theek hai" to show you're listening.
+5. **TIME LIMIT**: Qualify and transfer/close in **90 seconds**.
+6. **UNCLEAR SPEECH**: If you genuinely can't understand, say "Sorry, thoda clear bol sakte ho?" But don't ask this for background noise.
 
 ━━━━━━━━━━━━━━━━━━━━━━
 � STRICT FEMALE GRAMMAR (CRITICAL)

@@ -157,16 +157,20 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
 
         console.log(`✅ [${callSid}] Data fetched: ${lead.name}, Campaign: ${campaign.name}`);
 
-        // 4. DON'T wait for projects - Send Session Update IMMEDIATELY with minimal data
+        // 4. Wait for OpenAI WebSocket to open (CRITICAL!)
+        await wsOpenPromise;
+        console.log(`✅ [${callSid}] OpenAI Connected!`);
+
+        // 5. Send Session Update IMMEDIATELY (without projects for speed)
         console.log(`⚡ [${callSid}] Sending session update (fast path)...`);
         const quickSessionUpdate = createSessionUpdate(lead, campaign, []); // Empty projects for speed
         realtimeWS.send(JSON.stringify(quickSessionUpdate));
 
-        // 5. Trigger AI greeting IMMEDIATELY (no delay!)
+        // 6. Trigger AI greeting IMMEDIATELY (no delay!)
         console.log(`🎤 [${callSid}] Triggering AI greeting NOW...`);
         realtimeWS.send(JSON.stringify({ type: 'response.create' }));
 
-        // 6. Fetch projects in background (optional enhancement)
+        // 7. Fetch projects in background (optional enhancement)
         supabase
             .from('projects')
             .select('name, description, status, location')
@@ -179,7 +183,7 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                 }
             });
 
-        // 7. Create Call Log in Background (fire-and-forget)
+        // 8. Create Call Log in Background (fire-and-forget)
         const callLogPromise = supabase
             .from('call_logs')
             .insert({

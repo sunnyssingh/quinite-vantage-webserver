@@ -21,8 +21,8 @@ export const createSessionUpdate = (lead, campaign, otherProjects = []) => {
                 threshold: 0.7,
                 // 300ms: Capture beginning of speech properly
                 prefix_padding_ms: 300,
-                // 700ms: Wait longer before detecting end of speech (reduces false interruptions)
-                silence_duration_ms: 700
+                // 500ms: Balanced - fast enough for sales, resistant to noise
+                silence_duration_ms: 500
             },
 
             input_audio_format: "g711_ulaw",

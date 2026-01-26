@@ -4,6 +4,7 @@ import express from 'express';
 import http from 'http';
 import dotenv from 'dotenv';
 import plivo from 'plivo';
+import OpenAI from 'openai';
 import { createSessionUpdate } from './sessionUpdate.js';
 
 dotenv.config();
@@ -22,6 +23,11 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUP
 
 // Create Supabase client
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+// Create OpenAI client for sentiment analysis
+const openai = new OpenAI({
+    apiKey: OPENAI_API_KEY
+});
 
 console.log('🚀 Starting WebSocket Server...');
 console.log(`📡 Port: ${PORT}`);
@@ -82,18 +88,176 @@ app.all('/answer', (req, res) => {
 
 // Handle WebSocket upgrade manually
 server.on('upgrade', (request, socket, head) => {
-    console.log(`🔄 Upgrade request received for: ${request.url}`);
+    console.log(`\n🔄 [WS Server] Upgrade request received for: ${request.url}`);
+    console.log(`   Headers: ${JSON.stringify(request.headers)}`);
 
     if (request.url.startsWith('/voice/stream')) {
-        console.log('✅ Valid WebSocket path, handling upgrade...');
+        console.log('✅ [WS Server] Valid WebSocket path, handling upgrade...');
         wss.handleUpgrade(request, socket, head, (ws) => {
+            console.log('✅ [WS Server] WebSocket Connection Established!');
             wss.emit('connection', ws, request);
         });
     } else {
-        console.log(`❌ Invalid WebSocket path: ${request.url}`);
+        console.log(`❌ [WS Server] Invalid WebSocket path: ${request.url}`);
         socket.destroy();
     }
 });
+
+// ============================================================================
+// SENTIMENT ANALYSIS & LEAD SCORING (India Edition)
+// ============================================================================
+
+/**
+ * Analyze conversation sentiment using OpenAI
+ * Supports Hindi/Hinglish conversations
+ * Detects Indian property terms (BHK, sqft, lakh, crore)
+ */
+async function analyzeSentiment(transcript, leadId, callLogId, organizationId, callSid) {
+    try {
+        console.log(`🧠 [${callSid}] Analyzing sentiment...`);
+
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [{
+                role: "system",
+                content: `You are analyzing a real estate sales conversation in India. The conversation may be in Hindi, Hinglish (Hindi-English mix), or English.
+
+Analyze the conversation and return ONLY a JSON object with these fields:
+{
+  "sentiment_score": <number between -1 and 1>,
+  "sentiment_label": <"very_positive" | "positive" | "neutral" | "negative" | "very_negative">,
+  "primary_emotion": <"excited" | "interested" | "hesitant" | "frustrated" | "confused" | "angry" | "neutral">,
+  "intent": <"wants_callback" | "ready_to_buy" | "just_browsing" | "not_interested" | "needs_info">,
+  "interest_level": <"high" | "medium" | "low" | "none">,
+  "purchase_readiness": <"immediate" | "short_term" | "long_term" | "not_ready">,
+  "objections": <array of strings like ["price_concern", "location_issue", "timing_not_right"]>,
+  "budget_mentioned": <boolean>,
+  "budget_range": <string in format "₹X - ₹Y" or null>,
+  "timeline_mentioned": <boolean>,
+  "timeline": <string like "within 1 month" or null>,
+  "key_phrases": <array of important phrases from conversation>,
+  "recommended_action": <string describing next best action>
+}
+
+Look for Indian property terms:
+- BHK (bedroom-hall-kitchen)
+- sqft, square feet
+- lakh, crore (Indian number system)
+- locality, area names
+- amenities (parking, gym, club)
+
+Consider cultural context:
+- Family involvement in decisions
+- Budget discussions may be indirect
+- Interest shown through questions about amenities`
+            }, {
+                role: "user",
+                content: `Analyze this conversation:\n\n${transcript}`
+            }],
+            response_format: { type: "json_object" },
+            temperature: 0.3
+        });
+
+        const analysis = JSON.parse(completion.choices[0].message.content);
+        console.log(`✅ [${callSid}] Sentiment: ${analysis.sentiment_label} (${analysis.sentiment_score})`);
+        console.log(`   Interest: ${analysis.interest_level} | Intent: ${analysis.intent}`);
+
+        // Calculate priority score
+        const priorityScore = calculatePriorityScore(analysis);
+
+        // Save to conversation_insights
+        const { data, error } = await supabase
+            .from('conversation_insights')
+            .insert({
+                organization_id: organizationId,
+                call_log_id: callLogId,
+                lead_id: leadId,
+                overall_sentiment: analysis.sentiment_score,
+                sentiment_label: analysis.sentiment_label,
+                primary_emotion: analysis.primary_emotion,
+                intent: analysis.intent,
+                interest_level: analysis.interest_level,
+                objections: analysis.objections || [],
+                budget_mentioned: analysis.budget_mentioned || false,
+                budget_range: analysis.budget_range,
+                timeline_mentioned: analysis.timeline_mentioned || false,
+                timeline: analysis.timeline,
+                key_phrases: analysis.key_phrases || [],
+                recommended_action: analysis.recommended_action,
+                priority_score: priorityScore
+            })
+            .select()
+            .single();
+
+        if (error) {
+            console.error(`❌ [${callSid}] Failed to save insights:`, error.message);
+            return null;
+        }
+
+        console.log(`✅ [${callSid}] Insights saved | Priority: ${priorityScore}/100`);
+
+        // Update call_logs with sentiment
+        await supabase
+            .from('call_logs')
+            .update({
+                sentiment_score: analysis.sentiment_score,
+                interest_level: analysis.interest_level,
+                conversation_summary: analysis.recommended_action
+            })
+            .eq('id', callLogId);
+
+        // Update lead with insights
+        await supabase
+            .from('leads')
+            .update({
+                interest_level: analysis.interest_level,
+                purchase_readiness: analysis.purchase_readiness,
+                budget_range: analysis.budget_range,
+                last_sentiment_score: analysis.sentiment_score,
+                total_calls: supabase.raw('total_calls + 1')
+            })
+            .eq('id', leadId);
+
+        return data;
+    } catch (error) {
+        console.error(`❌ [${callSid}] Sentiment analysis error:`, error.message);
+        return null;
+    }
+}
+
+/**
+ * Calculate priority score (0-100) for lead prioritization
+ */
+function calculatePriorityScore(analysis) {
+    let score = 50; // Base score
+
+    // Sentiment impact (20 points)
+    if (analysis.sentiment_score > 0.7) score += 20;
+    else if (analysis.sentiment_score > 0.3) score += 10;
+    else if (analysis.sentiment_score < -0.3) score -= 10;
+
+    // Interest level (30 points)
+    if (analysis.interest_level === 'high') score += 30;
+    else if (analysis.interest_level === 'medium') score += 15;
+    else if (analysis.interest_level === 'low') score -= 10;
+
+    // Purchase readiness (30 points)
+    if (analysis.purchase_readiness === 'immediate') score += 30;
+    else if (analysis.purchase_readiness === 'short_term') score += 20;
+    else if (analysis.purchase_readiness === 'long_term') score += 10;
+
+    // Budget mentioned (10 points)
+    if (analysis.budget_mentioned) score += 10;
+
+    // Timeline mentioned (10 points)
+    if (analysis.timeline_mentioned) score += 10;
+
+    // Objections penalty
+    if (analysis.objections && analysis.objections.length > 2) score -= 10;
+
+    // Ensure score is between 0-100
+    return Math.max(0, Math.min(100, score));
+}
 
 // Start OpenAI Realtime WebSocket connection
 const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) => {
@@ -205,6 +369,43 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                 return data;
             });
 
+        // 📊 Track Call Attempt
+        const attemptPromise = callLogPromise.then(async (callLog) => {
+            if (!callLog) return null;
+
+            // Count previous attempts for this lead
+            const { count } = await supabase
+                .from('call_attempts')
+                .select('*', { count: 'exact', head: true })
+                .eq('lead_id', leadId)
+                .eq('campaign_id', campaignId);
+
+            const attemptNumber = (count || 0) + 1;
+
+            const { data, error } = await supabase
+                .from('call_attempts')
+                .insert({
+                    organization_id: campaign.organization_id,
+                    lead_id: leadId,
+                    campaign_id: campaignId,
+                    call_log_id: callLog.id,
+                    attempt_number: attemptNumber,
+                    channel: 'voice_ai',
+                    attempted_at: new Date().toISOString(),
+                    outcome: 'in_progress'
+                })
+                .select()
+                .single();
+
+            if (error) {
+                console.error(`❌ [${callSid}] Attempt tracking error:`, error.message);
+            } else {
+                console.log(`✅ [${callSid}] Call attempt #${attemptNumber} tracked`);
+            }
+
+            return data;
+        });
+
         let conversationTranscript = '';
 
         // Continue with event handlers... (Remove duplicate 'open' handler since we handled it)
@@ -298,8 +499,35 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                     } else {
                                         console.log(`✅ [${callSid}] Call log updated successfully:`, updatedCallLog);
                                     }
+
+                                    // 2. Create Agent Call Record
+                                    const { data: agentCall, error: agentCallError } = await supabase
+                                        .from('agent_calls')
+                                        .insert({
+                                            organization_id: campaign.organization_id,
+                                            lead_id: leadId,
+                                            campaign_id: campaignId,
+                                            ai_call_log_id: callLog.id,
+                                            agent_name: agentName,
+                                            call_sid: callSid,
+                                            started_at: new Date().toISOString(),
+                                            outcome: 'pending_acceptance',
+                                            metadata: {
+                                                transfer_reason: args.reason,
+                                                department: args.department,
+                                                transfer_number: transferNumber
+                                            }
+                                        })
+                                        .select()
+                                        .single();
+
+                                    if (agentCallError) {
+                                        console.error(`❌ [${callSid}] Agent call creation error:`, agentCallError);
+                                    } else {
+                                        console.log(`✅ [${callSid}] Agent call record created: ${agentCall.id}`);
+                                    }
                                 } else {
-                                    console.warn(`⚠️ [${callSid}] callLog not found, skipping DB update for transfer.`);
+                                    console.warn(`⚠️  [${callSid}] callLog not found, skipping DB update for transfer.`);
                                 }
 
                                 // 2. Update Lead Status
@@ -629,8 +857,7 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                 realtimeWS.close();
             }
 
-            // Save transcript
-            // Save transcript
+            // Save transcript and run sentiment analysis
             const callLog = await callLogPromise;
             if (callLog) {
                 console.log(`💾 [${callSid}] Saving transcript...`);
@@ -643,7 +870,6 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                     .single();
 
                 const isTransferred = currentLog?.transferred || false;
-                // If expected status wasn't set by a tool, default to 'contacted' so we know we spoke.
                 const finalStatus = isTransferred ? 'transferred' : (currentLog?.call_status === 'in_progress' ? 'completed' : currentLog?.call_status);
 
                 const { error: updateError } = await supabase
@@ -654,7 +880,7 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                     })
                     .eq('id', callLog.id);
 
-                // Update lead status if not transferred (if transferred, we already handled it)
+                // Update lead status if not transferred
                 if (!isTransferred) {
                     await supabase
                         .from('leads')
@@ -666,6 +892,47 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                     console.error(`❌ [${callSid}] Error saving transcript:`, updateError);
                 } else {
                     console.log(`✅ [${callSid}] Transcript saved successfully`);
+                }
+
+                // 🧠 RUN SENTIMENT ANALYSIS (if transcript is substantial)
+                if (conversationTranscript && conversationTranscript.length > 100) {
+                    console.log(`🧠 [${callSid}] Running sentiment analysis...`);
+                    await analyzeSentiment(
+                        conversationTranscript,
+                        leadId,
+                        callLog.id,
+                        campaign.organization_id,
+                        callSid
+                    );
+                } else {
+                    console.log(`⚠️  [${callSid}] Transcript too short for analysis`);
+                }
+
+                // 📊 Update Call Attempt Outcome
+                const attempt = await attemptPromise;
+                if (attempt) {
+                    const callOutcome = conversationTranscript.length > 50 ? 'answered' : 'no_answer';
+                    const duration = Math.floor((new Date() - new Date(attempt.attempted_at)) / 1000);
+
+                    await supabase
+                        .from('call_attempts')
+                        .update({
+                            outcome: callOutcome,
+                            duration: duration,
+                            // Schedule retry if no answer and attempt < 3
+                            will_retry: callOutcome === 'no_answer' && attempt.attempt_number < 3,
+                            next_retry_at: callOutcome === 'no_answer' && attempt.attempt_number < 3
+                                ? new Date(Date.now() + (attempt.attempt_number === 1 ? 2 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000)).toISOString()
+                                : null,
+                            retry_reason: callOutcome === 'no_answer' ? 'no_answer' : null
+                        })
+                        .eq('id', attempt.id);
+
+                    console.log(`✅ [${callSid}] Call attempt marked as: ${callOutcome}`);
+
+                    if (callOutcome === 'no_answer' && attempt.attempt_number < 3) {
+                        console.log(`🔄 [${callSid}] Retry scheduled for attempt #${attempt.attempt_number + 1}`);
+                    }
                 }
             }
 

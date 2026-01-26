@@ -51,12 +51,14 @@ async function processQueue() {
             return;
         }
 
-        console.log(`📥 Processing ${queueItems.length} items from queue...`);
+        console.log(`📥 [Queue Worker] Processing ${queueItems.length} items from queue...`);
 
         for (const item of queueItems) {
+            console.log(`▶️ [Queue Worker] Processing Item ID: ${item.id} | Lead: ${item.lead_id}`);
             await executeCall(item);
             // Simple Rate Limiting: Sleep between calls
             await new Promise(r => setTimeout(r, 1000 / CALLS_PER_SECOND));
+            console.log(`⏸️ [Queue Worker] Rate limit sleep done.`);
         }
 
     } catch (err) {

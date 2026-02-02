@@ -17,8 +17,8 @@ export const createSessionUpdate = (lead, campaign, otherProjects = []) => {
             -------------------------------- */
             turn_detection: {
                 type: "server_vad",
-                // 0.7: Higher threshold = less sensitive to background noise (traffic, wind, etc.)
-                threshold: 0.7,
+                // 0.5: Lower threshold = more sensitive to soft voices (sales optimized)
+                threshold: 0.5,
                 // 300ms: Capture beginning of speech properly
                 prefix_padding_ms: 300,
                 // 500ms: Balanced - fast enough for sales, resistant to noise

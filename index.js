@@ -528,12 +528,15 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                             }
 
                             try {
+                                const transferUrl = `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/plivo/transfer?to=${encodeURIComponent(transferNumber)}&leadId=${leadId}&campaignId=${campaignId}`;
+                                console.log(`🔗 [${callSid}] Transfer URL: ${transferUrl}`);
+
                                 const transferResponse = await plivoClient.calls.transfer(callSid, {
                                     legs: 'aleg',
-                                    aleg_url: `${process.env.NEXT_PUBLIC_SITE_URL}/api/webhooks/plivo/transfer?to=${encodeURIComponent(transferNumber)}&leadId=${leadId}&campaignId=${campaignId}`,
+                                    aleg_url: transferUrl,
                                     aleg_method: 'POST'
                                 });
-                                console.log(`✅ [${callSid}] Transfer initiated:`, transferResponse);
+                                console.log(`✅ [${callSid}] Transfer initiated via Plivo API`);
 
                                 // ✅ Update Database Immediately for Dashboard Accuracy
                                 const callLog = await callLogPromise;
@@ -926,6 +929,11 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                         const aiText = response.transcript;
                         console.log(`🤖 [${callSid}] AI: "${aiText}"`);
                         conversationTranscript += `AI: ${aiText}\n`;
+                        break;
+
+                    case 'conversation.item.input_audio_transcription.failed':
+                        console.error(`❌ [${callSid}] Transcription FAILED:`, response.error);
+                        conversationTranscript += `(User speech transcription failed: ${response.error?.message})\n`;
                         break;
 
                     case 'response.done':

@@ -259,6 +259,65 @@ function calculatePriorityScore(analysis) {
     return Math.max(0, Math.min(100, score));
 }
 
+/**
+ * Get appropriate pipeline stage for a lead based on outcome
+ * @param {string} leadId - Lead ID
+ * @param {string} outcome - Outcome type: 'qualified', 'contacted', 'lost', 'converted'
+ * @returns {Promise<string|null>} - Stage ID or null
+ */
+async function getPipelineStageForOutcome(leadId, outcome) {
+    try {
+        // Get lead's current pipeline
+        const { data: lead, error: leadError } = await supabase
+            .from('leads')
+            .select('stage_id, pipeline_stages!inner(pipeline_id)')
+            .eq('id', leadId)
+            .single();
+
+        if (leadError || !lead) {
+            console.error(`❌ Failed to get lead pipeline:`, leadError?.message);
+            return null;
+        }
+
+        const pipelineId = lead.pipeline_stages.pipeline_id;
+
+        // Map outcomes to stage name patterns
+        const stagePatterns = {
+            'qualified': ['%qualified%', '%interested%', '%hot%'],
+            'contacted': ['%contacted%', '%in contact%', '%follow%'],
+            'lost': ['%lost%', '%closed lost%', '%disqualified%', '%dead%'],
+            'converted': ['%won%', '%converted%', '%closed won%', '%success%']
+        };
+
+        const patterns = stagePatterns[outcome] || ['%contacted%'];
+
+        // Try to find matching stage
+        for (const pattern of patterns) {
+            const { data: stage } = await supabase
+                .from('pipeline_stages')
+                .select('id')
+                .eq('pipeline_id', pipelineId)
+                .ilike('name', pattern)
+                .limit(1)
+                .single();
+
+            if (stage) {
+                console.log(`✅ Found stage for outcome '${outcome}': ${stage.id}`);
+                return stage.id;
+            }
+        }
+
+        // Fallback: keep current stage
+        console.warn(`⚠️  No matching stage found for outcome '${outcome}', keeping current stage`);
+        return lead.stage_id;
+
+    } catch (error) {
+        console.error(`❌ Error getting pipeline stage:`, error.message);
+        return null;
+    }
+}
+
+
 // Start OpenAI Realtime WebSocket connection
 const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) => {
     console.log(`\n🎯 [${callSid}] ===== STARTING REALTIME CONNECTION =====`);
@@ -530,21 +589,29 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                     console.warn(`⚠️  [${callSid}] callLog not found, skipping DB update for transfer.`);
                                 }
 
-                                // 2. Update Lead Status
+                                // 2. Update Lead Status - Use Pipeline Stages
+                                const qualifiedStageId = await getPipelineStageForOutcome(leadId, 'qualified');
+
+                                const leadUpdatePayload = {
+                                    transferred_to_human: true,
+                                    last_contacted_at: new Date().toISOString()
+                                };
+
+                                // Only update stage if we found a valid one
+                                if (qualifiedStageId) {
+                                    leadUpdatePayload.stage_id = qualifiedStageId;
+                                }
+
                                 const { data: updatedLead, error: leadUpdateError } = await supabase
                                     .from('leads')
-                                    .update({
-                                        call_status: 'transferred',
-                                        status: 'transferred', // Ensure main status updates immediately for UI
-                                        transferred_to_human: true
-                                    })
+                                    .update(leadUpdatePayload)
                                     .eq('id', leadId)
                                     .select();
 
                                 if (leadUpdateError) {
                                     console.error(`❌ [${callSid}] Lead update error:`, leadUpdateError);
                                 } else {
-                                    console.log(`✅ [${callSid}] Lead updated successfully:`, updatedLead);
+                                    console.log(`✅ [${callSid}] Lead moved to qualified stage:`, updatedLead);
                                 }
 
                                 // 🛑 IMPORTANT: Stop AI from generating more audio immediately
@@ -618,19 +685,36 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                     console.log(`✅ [${callSid}] Call log updated successfully`);
                                 }
 
-                                // Update Lead Status based on disconnect reason
+                                // Update Lead Status based on disconnect reason - Use Pipeline Stages
                                 const normalizedReason = (args.reason || 'other').toLowerCase().replace(/\s+/g, '_');
-                                const leadStatus = normalizedReason.includes('not_interested') ? 'lost' :
-                                    normalizedReason.includes('abusive') ? 'do_not_call' :
-                                        normalizedReason.includes('wrong') ? 'invalid' : 'contacted';
+
+                                // Determine outcome based on reason
+                                let outcome = 'contacted'; // Default
+                                if (normalizedReason.includes('not_interested') || normalizedReason.includes('abusive')) {
+                                    outcome = 'lost';
+                                } else if (normalizedReason.includes('wrong')) {
+                                    outcome = 'lost'; // Wrong number = lost lead
+                                }
+
+                                const stageId = await getPipelineStageForOutcome(leadId, outcome);
 
                                 // Prepare lead update with detailed notes
                                 const leadUpdatePayload = {
-                                    status: leadStatus,
-                                    call_status: 'completed',
                                     rejection_reason: args.reason,
-                                    notes: args.notes || `Call ended: ${args.reason}`
+                                    notes: args.notes || `Call ended: ${args.reason}`,
+                                    last_contacted_at: new Date().toISOString()
                                 };
+
+                                // Only update stage if we found a valid one
+                                if (stageId) {
+                                    leadUpdatePayload.stage_id = stageId;
+                                }
+
+                                // Add abuse flag if abusive
+                                if (normalizedReason.includes('abusive')) {
+                                    leadUpdatePayload.abuse_flag = true;
+                                    leadUpdatePayload.abuse_details = args.notes || 'Abusive language during call';
+                                }
 
                                 const { error: leadError } = await supabase
                                     .from('leads')
@@ -640,7 +724,7 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                 if (leadError) {
                                     console.error(`❌ [${callSid}] Lead status update FAILED:`, leadError);
                                 } else {
-                                    console.log(`✅ [${callSid}] Lead updated: ${leadStatus} | Reason: ${args.reason}`);
+                                    console.log(`✅ [${callSid}] Lead updated: ${outcome} | Reason: ${args.reason}`);
                                     console.log(`📋 [${callSid}] Notes saved: ${args.notes || 'None'}`);
                                 }
 
@@ -694,13 +778,28 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                             console.log(`📄 [${callSid}] Notes: ${args.notes || 'None'}`);
 
                             try {
+                                // Map AI status to outcome
+                                const outcomeMap = {
+                                    'contacted': 'contacted',
+                                    'qualified': 'qualified',
+                                    'lost': 'lost',
+                                    'converted': 'converted'
+                                };
+
+                                const outcome = outcomeMap[args.status] || 'contacted';
+                                const stageId = await getPipelineStageForOutcome(leadId, outcome);
+
                                 // Build comprehensive update payload
                                 const updatePayload = {
-                                    status: args.status,
-                                    call_status: args.status === 'converted' ? 'converted' : 'contacted',
                                     rejection_reason: args.reason || null,
-                                    notes: args.notes || null
+                                    notes: args.notes || null,
+                                    last_contacted_at: new Date().toISOString()
                                 };
+
+                                // Only update stage if we found a valid one
+                                if (stageId) {
+                                    updatePayload.stage_id = stageId;
+                                }
 
                                 const { error: updateError } = await supabase
                                     .from('leads')
@@ -713,7 +812,7 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                 }
 
                                 console.log(`✅ [${callSid}] Lead status updated successfully`);
-                                console.log(`   Status: ${args.status}`);
+                                console.log(`   Outcome: ${outcome}`);
                                 console.log(`   Reason: ${args.reason || 'N/A'}`);
                                 console.log(`   Notes: ${args.notes || 'N/A'}`);
 

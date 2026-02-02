@@ -19,7 +19,7 @@ const plivoClient = new plivo.Client(
  * Runs every 5 minutes to check for leads that need retry
  */
 async function processRetries() {
-    console.log('🔄 Checking for retry attempts...');
+    console.log(`\n⏳ [Retry Worker] Checking for retry attempts at ${new Date().toLocaleTimeString()}...`);
 
     const now = new Date().toISOString();
 
@@ -54,7 +54,7 @@ async function processRetries() {
             // Determine retry strategy based on attempt number
             if (attempt.attempt_number < 3) {
                 // Retry with voice call
-                console.log(`📞 Retry #${attempt.attempt_number + 1} for ${lead.name}`);
+                console.log(`🎤 [Retry Worker] Action: RE-ENQUEUE VOICE | Lead: ${lead.name} | Attempt: ${attempt.attempt_number + 1}`);
 
                 await supabase.from('call_queue').insert({
                     campaign_id: campaign.id,
@@ -67,7 +67,7 @@ async function processRetries() {
 
             } else if (attempt.attempt_number === 3) {
                 // Switch to SMS fallback
-                console.log(`📱 Sending SMS fallback to ${lead.name}`);
+                console.log(`📱 [Retry Worker] Action: SMS FALLBACK | Lead: ${lead.name} | Phone: ${lead.phone}`);
 
                 const smsMessage = `नमस्ते ${lead.name}, हमने आपको 3 बार कॉल करने की कोशिश की। कृपया हमें वापस कॉल करें: ${process.env.PLIVO_PHONE_NUMBER}`;
 

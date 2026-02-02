@@ -29,6 +29,9 @@ export const createSessionUpdate = (lead, campaign, otherProjects = []) => {
             output_audio_format: "g711_ulaw",
             modalities: ["text", "audio"],
             temperature: 0.6,
+            input_audio_transcription: {
+                model: "whisper-1"
+            },
 
             /* -------------------------------
                CORE BRAIN / SYSTEM PROMPT

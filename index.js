@@ -979,11 +979,16 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                 const isTransferred = currentLog?.transferred || false;
                 const finalStatus = isTransferred ? 'transferred' : (currentLog?.call_status === 'in_progress' ? 'completed' : currentLog?.call_status);
 
+                const endedAt = new Date();
+                const duration = Math.round((endedAt - new Date(callLog.created_at)) / 1000);
+
                 const { error: updateError } = await supabase
                     .from('call_logs')
                     .update({
                         conversation_transcript: conversationTranscript,
-                        call_status: finalStatus
+                        call_status: finalStatus,
+                        ended_at: endedAt.toISOString(),
+                        duration: duration
                     })
                     .eq('id', callLog.id);
 

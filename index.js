@@ -511,6 +511,7 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                 if (agentError) {
                                     console.error(`⚠️ [${callSid}] Failed to fetch agents:`, agentError.message);
                                 } else if (agents && agents.length > 0) {
+                                    console.log(`ℹ️ [${callSid}] Found ${agents.length} active agents.`);
                                     // 🎲 Pick a Random Agent (Simple Round Robin)
                                     // Improvement: We could store 'last_call_at' to pick the idle one.
                                     const randomAgent = agents[Math.floor(Math.random() * agents.length)];
@@ -519,6 +520,8 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                         transferNumber = randomAgent.phone;
                                         agentName = randomAgent.full_name || 'Sales Agent';
                                         console.log(`🎯 [${callSid}] Selected Agent: ${agentName} (${transferNumber})`);
+                                    } else {
+                                        console.warn(`⚠️ [${callSid}] Selected agent ${randomAgent.full_name} has no phone number.`);
                                     }
                                 } else {
                                     console.warn(`⚠️ [${callSid}] No active agents found with phone numbers. Using Fallback.`);
@@ -536,7 +539,7 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                     aleg_url: transferUrl,
                                     aleg_method: 'POST'
                                 });
-                                console.log(`✅ [${callSid}] Transfer initiated via Plivo API`);
+                                console.log(`✅ [${callSid}] Transfer initiated via Plivo API. Response:`, JSON.stringify(transferResponse));
 
                                 // ✅ Update Database Immediately for Dashboard Accuracy
                                 const callLog = await callLogPromise;

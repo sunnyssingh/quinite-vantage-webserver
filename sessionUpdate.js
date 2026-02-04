@@ -30,7 +30,8 @@ export const createSessionUpdate = (lead, campaign, otherProjects = []) => {
             modalities: ["text", "audio"],
             temperature: 0.6,
             input_audio_transcription: {
-                model: "whisper-1"
+                model: "whisper-1",
+                language: "hi"  // Hindi language code for better Hinglish transcription
             },
 
             /* -------------------------------

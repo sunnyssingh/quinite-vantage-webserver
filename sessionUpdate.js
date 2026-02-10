@@ -1,4 +1,4 @@
-export const createSessionUpdate = (lead, campaign, otherProjects = []) => {
+export const createSessionUpdate = (lead, campaign, otherProjects = [], availableInventory = []) => {
     const otherProjectsContext =
         otherProjects.length > 0
             ? otherProjects
@@ -8,6 +8,16 @@ export const createSessionUpdate = (lead, campaign, otherProjects = []) => {
                 )
                 .join('\n')
             : 'No other active projects.';
+
+    // Create inventory context for AI
+    const inventoryContext = availableInventory.length > 0
+        ? availableInventory.map(prop => {
+            const bhk = prop.bedrooms ? `${prop.bedrooms}BHK` : 'Studio';
+            const bathrooms = prop.bathrooms ? `, ${prop.bathrooms} Bath` : '';
+            return `**${prop.title}** (${prop.type}):\n  - ${bhk}${bathrooms}, ${prop.size_sqft} sqft, ₹${(prop.price / 100000).toFixed(1)}L - STATUS: ${prop.status.toUpperCase()}\n  - Location: ${prop.address || 'N/A'}`;
+        }).join('\n\n')
+        : '⚠️ NO UNITS CURRENTLY AVAILABLE';
+
 
     return {
         type: "session.update",
@@ -145,6 +155,35 @@ ${otherProjectsContext}
 **Cross-Selling Tip**: If they say "Budget too high" or "Location not preferred", mention: "Sir, we have other projects too. Let me quickly tell you about them."
 
 ━━━━━━━━━━━━━━━━━━━━━━
+🏠 AVAILABLE INVENTORY (CRITICAL!)
+━━━━━━━━━━━━━━━━━━━━━━
+⚠️ **STRICT RULE**: You can ONLY discuss units that are listed below as "AVAILABLE".
+DO NOT promise or discuss units that are not in this list.
+
+**Total Available Units**: ${availableInventory.length}
+
+${inventoryContext}
+
+${availableInventory.length === 0 ? `
+⚠️ **SOLD OUT SCENARIO** - What to say:
+"Sir/Madam, is project ki saari units book ho gayi hain. But main aapko hamare other projects ke baare mein bata sakti hoon, ya aapko waitlist mein add kar sakti hoon future availability ke liye. Kya aap interested honge?"
+
+**Actions when sold out**:
+1. Inform customer politely that all units are sold
+2. Offer to show other projects
+3. Offer to add to waitlist
+4. Transfer to human if they insist
+` : `
+**INVENTORY RULES**:
+1. ✅ If customer asks about a specific unit number, CHECK this list first
+2. ❌ If unit is not listed or status is not "available", say: "Sir, woh unit already book ho gaya hai. But yeh units available hain: [mention available units]"
+3. ❌ If ALL units are sold, follow the SOLD OUT SCENARIO above
+4. ❌ NEVER make up unit numbers or availability
+5. ✅ If unsure about availability, use the check_unit_availability tool
+6. ✅ Always mention specific unit numbers when discussing availability
+`}
+
+━━━━━━━━━━━━━━━━━━━━━━
 🔁 TRANSFER BEHAVIOR
 ━━━━━━━━━━━━━━━━━━━━━━
 Before calling transfer_call, ALWAYS say:
@@ -239,6 +278,25 @@ DO NOT just say "Bye" and wait. You MUST execute the tool to register the outcom
                             }
                         },
                         required: ["reason"]
+                    }
+                },
+                {
+                    type: "function",
+                    name: "check_unit_availability",
+                    description: "Check if a specific unit or property is available before promising it to customer. ALWAYS use this before confirming availability of a specific unit number.",
+                    parameters: {
+                        type: "object",
+                        properties: {
+                            unit_number: {
+                                type: "string",
+                                description: "The unit number customer is asking about"
+                            },
+                            property_name: {
+                                type: "string",
+                                description: "The property/building name (optional)"
+                            }
+                        },
+                        required: ["unit_number"]
                     }
                 },
                 {

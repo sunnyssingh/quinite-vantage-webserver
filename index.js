@@ -393,17 +393,33 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
         console.log(`🎤 [${callSid}] Triggering AI greeting NOW...`);
         realtimeWS.send(JSON.stringify({ type: 'response.create' }));
 
-        // 7. Fetch projects in background (optional enhancement)
-        supabase
+        // 7. Fetch projects AND inventory in background (parallel for speed)
+        const projectsPromise = supabase
             .from('projects')
             .select('name, description, status, location')
             .eq('organization_id', campaign.organization_id)
-            .eq('status', 'active')
-            .then(({ data }) => {
-                if (data && data.length > 0) {
-                    console.log(`📋 [${callSid}] Loaded ${data.length} other projects (background)`);
-                    // Could update session here if needed, but not critical for first response
-                }
+            .eq('status', 'active');
+
+        const inventoryPromise = supabase
+            .from('properties')
+            .select('id, title, type, status, price, size_sqft, bedrooms, bathrooms, address')
+            .eq('project_id', lead.project_id)
+            .eq('status', 'available');
+
+        Promise.all([projectsPromise, inventoryPromise])
+            .then(([projectsResult, inventoryResult]) => {
+                const otherProjects = projectsResult.data || [];
+                const availableInventory = inventoryResult.data || [];
+
+                console.log(`📋 [${callSid}] Loaded ${otherProjects.length} other projects`);
+                console.log(`🏠 [${callSid}] Loaded ${availableInventory.length} available properties with ${availableInventory.reduce((sum, p) => sum + (p.property_units?.length || 0), 0)} units`);
+
+                // Update session with full context
+                const fullSessionUpdate = createSessionUpdate(lead, campaign, otherProjects, availableInventory);
+                realtimeWS.send(JSON.stringify(fullSessionUpdate));
+            })
+            .catch(err => {
+                console.error(`❌ [${callSid}] Background fetch error:`, err);
             });
 
         // 8. Create Call Log in Background (fire-and-forget)
@@ -773,6 +789,82 @@ const startRealtimeWSConnection = async (plivoWS, leadId, campaignId, callSid) =
                                     }
                                 };
                                 realtimeWS.send(JSON.stringify(errorItem));
+                            }
+                        }
+
+                        // Handle check_unit_availability tool
+                        if (response.name === 'check_unit_availability') {
+                            const args = JSON.parse(response.arguments);
+                            console.log(`🏠 [${callSid}] Checking availability for Unit ${args.unit_number}`);
+
+                            try {
+                                const { data: units, error } = await supabase
+                                    .from('property_units')
+                                    .select('id, unit_number, status, price, bhk_config, area_sqft, property_id, properties(name)')
+                                    .eq('unit_number', args.unit_number);
+
+                                let result;
+                                if (error || !units || units.length === 0) {
+                                    result = {
+                                        available: false,
+                                        message: `Unit ${args.unit_number} not found in our records`
+                                    };
+                                } else {
+                                    // Find unit in the lead's project
+                                    const projectUnit = units.find(u => u.properties?.name);
+
+                                    if (!projectUnit) {
+                                        result = {
+                                            available: false,
+                                            message: `Unit ${args.unit_number} not found`
+                                        };
+                                    } else if (projectUnit.status !== 'available') {
+                                        result = {
+                                            available: false,
+                                            status: projectUnit.status,
+                                            message: `Unit ${args.unit_number} is currently ${projectUnit.status}`
+                                        };
+                                    } else {
+                                        result = {
+                                            available: true,
+                                            unit_number: projectUnit.unit_number,
+                                            property: projectUnit.properties?.name || 'Unknown',
+                                            config: projectUnit.bhk_config,
+                                            area: projectUnit.area_sqft,
+                                            price: projectUnit.price,
+                                            message: `Unit ${args.unit_number} is available - ${projectUnit.bhk_config}, ${projectUnit.area_sqft} sqft, ₹${(projectUnit.price / 100000).toFixed(1)}L`
+                                        };
+                                    }
+                                }
+
+                                console.log(`✅ [${callSid}] Property check result:`, result);
+
+                                const toolResponse = {
+                                    type: "conversation.item.create",
+                                    item: {
+                                        type: "function_call_output",
+                                        call_id: response.call_id,
+                                        output: JSON.stringify(result)
+                                    }
+                                };
+                                realtimeWS.send(JSON.stringify(toolResponse));
+                                realtimeWS.send(JSON.stringify({ type: "response.create" }));
+
+                            } catch (err) {
+                                console.error(`❌ [${callSid}] Property check failed:`, err);
+                                const errorResponse = {
+                                    type: "conversation.item.create",
+                                    item: {
+                                        type: "function_call_output",
+                                        call_id: response.call_id,
+                                        output: JSON.stringify({
+                                            available: false,
+                                            error: "Failed to check availability"
+                                        })
+                                    }
+                                };
+                                realtimeWS.send(JSON.stringify(errorResponse));
+                                realtimeWS.send(JSON.stringify({ type: "response.create" }));
                             }
                         }
 
